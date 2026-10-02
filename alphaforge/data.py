@@ -9,19 +9,34 @@ DEFAULT_UNIVERSE = [
 ]
 
 
-def load_prices(tickers, start, end=None, benchmark="SPY", max_missing=0.05):
+# Cross-asset strip shown on the terminal: label -> Yahoo symbol.
+MARKET_STRIP = {
+    "SPX": "^GSPC", "NDX": "^NDX", "RTY": "^RUT", "VIX": "^VIX", "UST10Y": "^TNX",
+    "DXY": "DX-Y.NYB", "GOLD": "GC=F", "WTI": "CL=F", "BTC": "BTC-USD", "EURUSD": "EURUSD=X",
+}
+
+
+def download(symbols, start, end=None):
+    """Raw adjusted OHLCV panel from Yahoo (columns: field x symbol). Raises on empty."""
+    import yfinance as yf
+
+    raw = yf.download(list(symbols), start=start, end=end, auto_adjust=True,
+                      progress=False, threads=False)
+    if raw.empty:
+        raise ValueError("No data returned from Yahoo Finance")
+    return raw
+
+
+def load_prices(tickers, start, end=None, benchmark="SPY", max_missing=0.05, raw=None):
     """Adjusted closes from Yahoo. Returns (prices, benchmark) aligned on trading days.
 
     Tickers missing more than `max_missing` of history are dropped rather than
     back-filled, so the backtest never sees prices that did not exist yet.
+    Pass `raw` (from `download`) to reuse an existing download.
     """
-    import yfinance as yf
-
-    raw = yf.download(list(tickers) + [benchmark], start=start, end=end,
-                      auto_adjust=True, progress=False)["Close"]
-    if raw.empty:
-        raise ValueError("No data returned from Yahoo Finance")
-    raw = raw.dropna(how="all")
+    if raw is None:
+        raw = download(list(tickers) + [benchmark], start, end)
+    raw = raw["Close"][list(tickers) + [benchmark]].dropna(how="all")
     bench = raw.pop(benchmark).ffill()
     keep = raw.columns[raw.isna().mean() <= max_missing]
     if len(keep) < 5:

@@ -46,6 +46,13 @@ def rebalance_dates(index, freq, warmup):
     return [d for d in dates if index.get_loc(d) >= warmup]
 
 
+def targets_at(alpha, rets, i, cfg):
+    """Target weights from information at row i only. Shared by backtest and live trading."""
+    hist = rets.iloc[max(1, i - cfg.cov_lookback + 1): i + 1]
+    return portfolio.target_weights(
+        alpha.iloc[i], hist, cfg.mode, cfg.max_weight, cfg.target_vol, cfg.max_leverage)
+
+
 def run_backtest(prices, cfg=None, benchmark=None):
     """Signals at close t, trade at close t+lag, earn returns from t+lag+1 onward.
 
@@ -63,9 +70,7 @@ def run_backtest(prices, cfg=None, benchmark=None):
         i = idx.get_loc(d)
         if i + cfg.execution_lag >= len(idx):
             continue
-        hist = rets.iloc[max(1, i - cfg.cov_lookback + 1): i + 1]
-        targets[idx[i + cfg.execution_lag]] = portfolio.target_weights(
-            alpha.iloc[i], hist, cfg.mode, cfg.max_weight, cfg.target_vol, cfg.max_leverage)
+        targets[idx[i + cfg.execution_lag]] = targets_at(alpha, rets, i, cfg)
 
     n = len(idx)
     cost_rate = (cfg.cost_bps + cfg.slippage_bps) / 1e4

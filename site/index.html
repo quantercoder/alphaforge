@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AlphaForge Terminal</title>
+<meta name="description" content="AlphaForge: multi-factor equity strategy terminal with a paper-traded book, signals, risk and research.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js" integrity="sha384-OK7vELvjHdhUFi31JYioPIcRHTROLdcDa6ZsNWgvgLaKj+9JqhU0Ad8g4wz3CXjA" crossorigin="anonymous"></script>
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #000000;
+  --panel: #070605;
+  --bar: #1a1006;
+  --rule: #2b2117;
+  --amber: #ff9f1c;
+  --ink: #ece8de;
+  --dim: #8a8273;
+  --cmd: #ffd23f;
+  --up: #2ee59d;
+  --down: #ff5a4f;
+  --sel: #2a1a05;
+  --blue: #4a9eff;
+  --f: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); font: 13px/1.35 var(--f); }
+body { min-height: 100vh; display: flex; flex-direction: column; }
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+:focus-visible { outline: 1px solid var(--cmd); outline-offset: 1px; }
+
+/* Command line: the one loud element. */
+.top { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center;
+  padding: 6px 10px; background: var(--bar); border-bottom: 1px solid var(--amber); }
+.cmd { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.cmd label { color: var(--amber); font-weight: 600; }
+.cmd input { flex: 1; min-width: 0; background: #000; color: var(--cmd); border: 1px solid #4a3410;
+  font: 500 14px var(--f); padding: 5px 8px; text-transform: uppercase; caret-color: var(--cmd); }
+.cmd input::placeholder { color: #a08a5a; text-transform: none; }
+.go { background: var(--cmd); color: #000; font-weight: 600; padding: 5px 10px; }
+.clock { display: flex; gap: 14px; color: var(--dim); white-space: nowrap; }
+.clock b { color: var(--ink); font-weight: 500; }
+.badge { padding: 1px 6px; border: 1px solid currentColor; }
+.badge.paper { color: var(--blue); } .badge.real { color: var(--down); } .badge.halt { color: var(--down); background: #2a0805; }
+.open { color: var(--up); } .closed { color: var(--dim); }
+
+.strip { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); border-bottom: 1px solid var(--rule); }
+.tile { padding: 5px 8px; border-right: 1px solid var(--rule); min-width: 0; }
+.tile .n { color: var(--amber); }
+.tile .v { font-weight: 500; }
+.tile .c { font-size: 12px; }
+
+main { flex: 1; display: grid; gap: 1px; background: var(--rule);
+  grid-template-columns: minmax(260px, 3fr) minmax(0, 6fr) minmax(280px, 3.4fr);
+  grid-template-areas: "mon gp book" "mon perf bltr" "sig risk mth"; }
+.p { background: var(--panel); display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.p > h2 { margin: 0; display: flex; justify-content: space-between; gap: 8px; align-items: baseline;
+  font: 600 12px var(--f); color: var(--amber); background: var(--bar); padding: 4px 8px; border-bottom: 1px solid var(--rule); }
+.p > h2 small { color: var(--dim); font-weight: 400; }
+.p > h2 .k { color: var(--cmd); font-weight: 500; }
+.p.flash > h2 { animation: flash .6s 2; }
+@keyframes flash { 50% { background: #4a3410; } }
+@media (prefers-reduced-motion: reduce) { .p.flash > h2 { animation: none; outline: 1px solid var(--cmd); } }
+.body { overflow: auto; flex: 1; min-height: 0; }
+#mon { grid-area: mon; max-height: 820px; } #gp { grid-area: gp; } #perf { grid-area: perf; }
+#book { grid-area: book; max-height: 420px; } #bltr { grid-area: bltr; max-height: 400px; }
+#sig { grid-area: sig; max-height: 460px; } #risk { grid-area: risk; } #mth { grid-area: mth; max-height: 460px; }
+
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th { position: sticky; top: 0; background: var(--panel); color: var(--dim); font-weight: 400; text-align: right;
+  padding: 3px 6px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+td { padding: 2px 6px; text-align: right; white-space: nowrap; border-bottom: 1px solid #120e0a; }
+th:first-child, td:first-child { text-align: left; }
+td.s { color: var(--amber); font-weight: 500; }
+tr.click { cursor: pointer; } tr.click:hover, tr.on { background: var(--sel); }
+.up { color: var(--up); } .dn { color: var(--down); } .mut { color: var(--dim); }
+.empty { color: var(--dim); padding: 14px 10px; }
+
+.ghead { display: flex; flex-wrap: wrap; gap: 4px 16px; padding: 6px 8px; align-items: baseline; border-bottom: 1px solid var(--rule); }
+.ghead .sym { color: var(--amber); font-size: 16px; font-weight: 600; }
+.ghead .px { font-size: 16px; font-weight: 500; }
+.ghead span { color: var(--dim); } .ghead span b { color: var(--ink); font-weight: 400; }
+.chart { height: 330px; }
+.tabs { display: flex; gap: 2px; }
+.tabs button { padding: 0 6px; color: var(--dim); }
+.tabs button[aria-pressed="true"] { color: #000; background: var(--amber); }
+.kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); border-bottom: 1px solid var(--rule); }
+.kpi { padding: 5px 8px; border-right: 1px solid var(--rule); }
+.kpi div:first-child { color: var(--dim); font-size: 12px; }
+.kpi div:last-child { font-weight: 500; font-size: 14px; }
+.legend { display: flex; gap: 14px; padding: 4px 8px; color: var(--dim); }
+.legend i { display: inline-block; width: 14px; height: 2px; vertical-align: middle; margin-right: 5px; }
+
+.rgrid { display: grid; grid-template-columns: 1fr 1fr; }
+.rgrid div { padding: 5px 8px; border-bottom: 1px solid var(--rule); display: flex; justify-content: space-between; }
+.rgrid span { color: var(--dim); }
+.bar { height: 8px; background: #1a140d; position: relative; }
+.bar i { position: absolute; top: 0; bottom: 0; }
+.expo td:last-child { width: 45%; }
+.corr { display: grid; gap: 1px; padding: 8px; }
+.corr i { aspect-ratio: 1; display: block; }
+.mth td { padding: 2px 3px; font-size: 12px; }
+
+.fkeys { display: flex; flex-wrap: wrap; gap: 1px; background: var(--rule); border-top: 1px solid var(--amber); }
+.fkeys button { flex: 1; min-width: 92px; background: var(--bar); padding: 5px 6px; text-align: left; }
+.fkeys button b { color: #000; background: var(--amber); padding: 0 4px; margin-right: 6px; font-weight: 600; }
+.foot { color: var(--dim); padding: 6px 10px; font-size: 12px; }
+.foot a { color: var(--amber); }
+
+dialog { background: #050403; color: var(--ink); border: 1px solid var(--amber); max-width: 560px; font: 12px/1.5 var(--f); }
+dialog::backdrop { background: rgba(0,0,0,.7); }
+dialog h3 { color: var(--amber); margin: 0 0 8px; font-size: 13px; }
+dialog code { color: var(--cmd); }
+
+@media (max-width: 1100px) {
+  main { grid-template-columns: 1fr 1fr; grid-template-areas: "gp gp" "perf perf" "mon book" "mon bltr" "sig risk" "mth mth"; }
+  .strip { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}
+@media (max-width: 700px) {
+  main { grid-template-columns: 1fr; grid-template-areas: "gp" "perf" "book" "mon" "bltr" "sig" "risk" "mth"; }
+  .strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .top { grid-template-columns: 1fr; }
+  .clock { flex-wrap: wrap; white-space: normal; }
+  .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .chart { height: 260px; }
+  #mon, #book, #bltr, #sig, #mth { max-height: 380px; }
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <form class="cmd" id="cmdform" autocomplete="off">
+    <label for="cmd">CMD</label>
+    <input id="cmd" placeholder="Type a ticker (NVDA) or a function (PORT, SIG, RISK, BT, HELP)" spellcheck="false">
+    <button class="go" type="submit">GO</button>
+  </form>
+  <div class="clock">
+    <span id="mkt"></span>
+    <span>NY <b id="ny">--:--:--</b></span>
+    <span>Data <b id="asof">loading</b></span>
+    <span id="mode"></span>
+  </div>
+</header>
+<div class="strip" id="strip" aria-label="Markets"></div>
+
+<main>
+  <section class="p" id="mon"><h2>Monitor <small><span class="k">MON</span> · click a row to chart</small></h2><div class="body" id="monb"></div></section>
+  <section class="p" id="gp"><h2><span>Price chart <small class="k">GP</small></span><span class="tabs" id="range"></span></h2>
+    <div class="ghead" id="ghead"></div><div class="chart" id="gpc"></div></section>
+  <section class="p" id="perf"><h2><span>Performance <small class="k">BT</small></span><span class="tabs" id="ptabs"></span></h2>
+    <div class="kpis" id="kpis"></div><div class="legend" id="plegend"></div><div class="chart" id="pc" style="height:260px"></div></section>
+  <section class="p" id="book"><h2>Paper book <small><span class="k">PORT</span> <span id="eq"></span></small></h2><div class="body" id="bookb"></div></section>
+  <section class="p" id="bltr"><h2>Order blotter <small class="k">BLTR</small></h2><div class="body" id="bltrb"></div></section>
+  <section class="p" id="sig"><h2>Signals <small><span class="k">SIG</span> · cross-sectional z-scores</small></h2><div class="body" id="sigb"></div></section>
+  <section class="p" id="risk"><h2>Risk <small class="k">RISK</small></h2><div class="body" id="riskb"></div></section>
+  <section class="p" id="mth"><h2>Monthly returns <small><span class="k">MTH</span> · backtest</small></h2><div class="body" id="mthb"></div></section>
+</main>
+
+<nav class="fkeys" id="fkeys" aria-label="Functions"></nav>
+<p class="foot">End-of-day and delayed data from Yahoo Finance. The book is a simulated paper account; nothing here is investment advice.
+  <a href="https://github.com/z125081-Sam-Lam/alphaforge">Source</a> · <a href="https://github.com/z125081-Sam-Lam/alphaforge/blob/main/docs/MATH.md">Model</a></p>
+
+<dialog id="help">
+  <h3>Commands</h3>
+  <p>Type in the command line and press Enter (GO). Any key you press outside a field jumps to it.</p>
+  <p><code>NVDA</code> or <code>NVDA GP</code>: chart a ticker<br>
+  <code>MON</code> monitor · <code>PORT</code> book · <code>BLTR</code> orders · <code>SIG</code> signals<br>
+  <code>RISK</code> risk · <code>BT</code> backtest · <code>MTH</code> monthly · <code>HELP</code> this panel</p>
+  <p>F1 to F8 map to the function bar. Data refreshes every five minutes.</p>
+  <form method="dialog"><button class="go">Close</button></form>
+</dialog>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const fmt = (v, d = 2) => v == null ? "–" : v.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+const pct = (v, d = 2, sign = true) => v == null ? "–" : (sign && v > 0 ? "+" : "") + (v * 100).toFixed(d) + "%";
+const cls = (v) => v == null || v === 0 ? "" : v > 0 ? "up" : "dn";
+const big = (v) => v == null ? "–" : v >= 1e9 ? (v / 1e9).toFixed(1) + "B" : v >= 1e6 ? (v / 1e6).toFixed(1) + "M" : v >= 1e3 ? (v / 1e3).toFixed(0) + "K" : v.toFixed(0);
+const money = (v) => v == null ? "–" : (v < 0 ? "-$" : "$") + Math.abs(v).toLocaleString("en-US", { maximumFractionDigits: 0 });
+const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+let D = null, sym = "SPY", range = 130, ptab = "bt", gpChart, pChart;
+const FUNCS = { MON: "mon", PORT: "book", BLTR: "bltr", SIG: "sig", RISK: "risk", BT: "perf", MTH: "mth", GP: "gp" };
+const FKEYS = [["F1", "HELP"], ["F2", "MON"], ["F3", "GP"], ["F4", "PORT"], ["F5", "BLTR"], ["F6", "SIG"], ["F7", "RISK"], ["F8", "BT"]];
+
+function chartOpts(el) {
+  return { width: el.clientWidth, height: el.clientHeight,
+    layout: { background: { color: css("--panel") }, textColor: css("--dim"), fontFamily: css("--f"), fontSize: 11 },
+    grid: { vertLines: { color: "#15100b" }, horzLines: { color: "#15100b" } },
+    rightPriceScale: { borderColor: css("--rule") }, timeScale: { borderColor: css("--rule") },
+    crosshair: { mode: 0, vertLine: { color: "#6b5a33", labelBackgroundColor: "#4a3410" },
+      horzLine: { color: "#6b5a33", labelBackgroundColor: "#4a3410" } } };
+}
+
+function renderStrip() {
+  $("strip").innerHTML = Object.entries(D.strip).map(([k, q]) => q ? `
+    <div class="tile"><div class="n">${k}</div><div class="v">${fmt(q.last, q.last < 10 ? 4 : 2)}</div>
+    <div class="c ${cls(q.pct)}">${fmt(q.chg, q.last < 10 ? 4 : 2)} ${pct(q.pct)}</div></div>` : "").join("");
+}
+
+function spark(arr) {
+  const lo = Math.min(...arr), hi = Math.max(...arr), w = 54, h = 14;
+  const pts = arr.map((v, i) => `${(i / (arr.length - 1)) * w},${h - ((v - lo) / (hi - lo || 1)) * h}`).join(" ");
+  const c = arr[arr.length - 1] >= arr[0] ? css("--up") : css("--down");
+  return `<svg width="${w}" height="${h}" aria-hidden="true"><polyline fill="none" stroke="${c}" stroke-width="1.2" points="${pts}"/></svg>`;
+}
+
+function renderMon() {
+  const rows = Object.entries(D.quotes).filter(([, q]) => q).sort((a, b) => b[1].pct - a[1].pct);
+  $("monb").innerHTML = `<table><thead><tr><th>Ticker</th><th>Last</th><th>Chg%</th><th>YTD</th><th>30d</th></tr></thead><tbody>${
+    rows.map(([s, q]) => `<tr class="click ${s === sym ? "on" : ""}" data-s="${s}" tabindex="0">
+      <td class="s">${s}</td><td>${fmt(q.last)}</td><td class="${cls(q.pct)}">${pct(q.pct)}</td>
+      <td class="${cls(q.ytd)}">${pct(q.ytd, 1)}</td><td>${spark(q.spark)}</td></tr>`).join("")}</tbody></table>`;
+  $("monb").querySelectorAll("tr.click").forEach((tr) => {
+    tr.onclick = () => loadSym(tr.dataset.s);
+    tr.onkeydown = (e) => { if (e.key === "Enter") loadSym(tr.dataset.s); };
+  });
+}
+
+function renderGP() {
+  const q = D.quotes[sym], bars = (D.ohlc[sym] || []).slice(-range);
+  const s = D.signals.find((x) => x.sym === sym);
+  $("ghead").innerHTML = `<b class="sym">${sym}</b><b class="px">${fmt(q.last)}</b>
+    <b class="${cls(q.pct)}">${fmt(q.chg)} ${pct(q.pct)}</b>
+    <span>52w <b>${fmt(q.lo52)} – ${fmt(q.hi52)}</b></span><span>Avg vol <b>${big(q.vol20)}</b></span>
+    ${s ? `<span>Alpha <b class="${cls(s.alpha)}">${fmt(s.alpha)}</b></span><span>Target <b>${pct(s.target, 1, false)}</b></span>` : ""}`;
+  $("range").innerHTML = [[22, "1M"], [65, "3M"], [130, "6M"], [260, "1Y"]].map(([n, l]) =>
+    `<button aria-pressed="${n === range}" data-n="${n}">${l}</button>`).join("");
+  $("range").querySelectorAll("button").forEach((b) => b.onclick = () => { range = +b.dataset.n; renderGP(); });
+  const el = $("gpc");
+  if (gpChart) gpChart.remove();
+  gpChart = LightweightCharts.createChart(el, chartOpts(el));
+  const up = css("--up"), dn = css("--down");
+  const c = gpChart.addCandlestickSeries({ upColor: up, downColor: dn, wickUpColor: up, wickDownColor: dn, borderVisible: false });
+  c.setData(bars.map(([t, o, h, l, cl]) => ({ time: t, open: o, high: h, low: l, close: cl })));
+  const v = gpChart.addHistogramSeries({ priceFormat: { type: "volume" }, priceScaleId: "vol" });
+  gpChart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+  v.setData(bars.map(([t, o, , , cl, vol]) => ({ time: t, value: vol, color: cl >= o ? "#1d5c43" : "#5c2420" })));
+  gpChart.timeScale().fitContent();
+}
+
+function renderPerf() {
+  $("ptabs").innerHTML = [["bt", "Backtest"], ["acct", "Paper account"]].map(([k, l]) =>
+    `<button aria-pressed="${k === ptab}" data-k="${k}">${l}</button>`).join("");
+  $("ptabs").querySelectorAll("button").forEach((b) => b.onclick = () => { ptab = b.dataset.k; renderPerf(); });
+  const s = D.backtest.summary, el = $("pc");
+  if (pChart) pChart.remove();
+  pChart = LightweightCharts.createChart(el, chartOpts(el));
+  const amber = css("--amber"), blue = css("--blue");
+  if (ptab === "bt") {
+    const k = [["CAGR", pct(s.CAGR, 1)], ["Sharpe", fmt(s.Sharpe)], ["Max DD", pct(s["Max Drawdown"], 1)],
+      ["Vol", pct(s["Ann. Vol"], 1, false)], ["Beta", fmt(s.Beta)], ["Alpha", pct(s["Alpha (ann.)"], 1)]];
+    $("kpis").innerHTML = k.map(([a, b]) => `<div class="kpi"><div>${a}</div><div>${b}</div></div>`).join("");
+    $("plegend").innerHTML = `<span><i style="background:${amber}"></i>Strategy (${D.status.mode.replace("_", "-")})</span>
+      <span><i style="background:${blue}"></i>SPY</span><span>Growth of $1 since ${D.backtest.start}, weekly, log scale</span>`;
+    pChart.priceScale("right").applyOptions({ mode: 1 });
+    const t = D.backtest.dates;
+    pChart.addLineSeries({ color: blue, lineWidth: 2, priceLineVisible: false, title: "SPY" })
+      .setData(t.map((d, i) => ({ time: d, value: D.backtest.bench[i] })));
+    pChart.addLineSeries({ color: amber, lineWidth: 2, priceLineVisible: false, title: "Strategy" })
+      .setData(t.map((d, i) => ({ time: d, value: D.backtest.strategy[i] })));
+  } else {
+    const a = D.account, first = a.curve[0] ?? a.equity, last = a.curve[a.curve.length - 1] ?? a.equity;
+    const prev = a.curve.length > 1 ? a.curve[a.curve.length - 2] : first;
+    const k = [["Equity", money(a.equity)], ["Day P&L", money(last - prev)], ["Since start", pct(last / first - 1)],
+      ["Cash", money(a.cash)], ["Drawdown", pct(a.high_water ? a.equity / a.high_water - 1 : 0)], ["Days", a.curve.length]];
+    $("kpis").innerHTML = k.map(([x, y]) => `<div class="kpi"><div>${x}</div><div>${y}</div></div>`).join("");
+    $("plegend").innerHTML = `<span><i style="background:${amber}"></i>Paper equity, marked at each close</span>`;
+    pChart.addAreaSeries({ lineColor: amber, topColor: "rgba(255,159,28,.25)", bottomColor: "rgba(255,159,28,0)", lineWidth: 2 })
+      .setData(a.dates.map((d, i) => ({ time: d, value: a.curve[i] })));
+  }
+  pChart.timeScale().fitContent();
+}
+
+function renderBook() {
+  $("eq").textContent = money(D.account.equity);
+  if (!D.book.length) {
+    const p = D.status.pending;
+    $("bookb").innerHTML = `<p class="empty">No positions yet. ${p ? `The ${p} rebalance fills at the next close.` : "The book opens at the next month-end signal."}</p>`;
+    return;
+  }
+  $("bookb").innerHTML = `<table><thead><tr><th>Ticker</th><th>Qty</th><th>Last</th><th>Value</th><th>Wt</th><th>P&L</th></tr></thead><tbody>${
+    D.book.map((p) => `<tr class="click" data-s="${p.sym}"><td class="s">${p.sym}</td><td>${fmt(p.qty, 0)}</td><td>${fmt(p.last)}</td>
+      <td>${money(p.mv)}</td><td>${pct(p.weight, 1, false)}</td><td class="${cls(p.upl)}">${money(p.upl)} <span class="mut">${pct(p.upl_pct, 1)}</span></td></tr>`).join("")}</tbody></table>`;
+  $("bookb").querySelectorAll("tr.click").forEach((tr) => tr.onclick = () => loadSym(tr.dataset.s));
+}
+
+function renderBltr() {
+  $("bltrb").innerHTML = D.blotter.length ? `<table><thead><tr><th>Date</th><th>Side</th><th>Ticker</th><th>Qty</th><th>Price</th><th>Status</th></tr></thead><tbody>${
+    D.blotter.map((o) => `<tr><td class="mut">${o.date}</td><td class="${o.qty > 0 ? "up" : "dn"}">${o.qty > 0 ? "BUY" : "SELL"}</td>
+      <td class="s">${o.symbol}</td><td>${fmt(Math.abs(o.qty), 0)}</td><td>${fmt(o.price)}</td><td class="mut">${o.status}</td></tr>`).join("")}</tbody></table>`
+    : `<p class="empty">No orders yet. Fills appear here after each rebalance.</p>`;
+}
+
+function renderSig() {
+  const f = ["momentum", "reversal", "low_vol", "quality_trend"], lab = ["Mom", "Rev", "LoVol", "Trend"];
+  $("sigb").innerHTML = `<table><thead><tr><th>Ticker</th><th>Alpha</th>${lab.map((l) => `<th>${l}</th>`).join("")}<th>Target</th></tr></thead><tbody>${
+    D.signals.map((s) => `<tr class="click" data-s="${s.sym}"><td class="s">${s.sym}</td><td class="${cls(s.alpha)}"><b>${fmt(s.alpha)}</b></td>
+      ${f.map((k) => `<td class="${cls(s[k])}">${fmt(s[k])}</td>`).join("")}<td>${s.target ? pct(s.target, 1, false) : '<span class="mut">–</span>'}</td></tr>`).join("")}</tbody></table>`;
+  $("sigb").querySelectorAll("tr.click").forEach((tr) => tr.onclick = () => loadSym(tr.dataset.s));
+}
+
+function corrColor(v) {
+  // Diverging: blue (negative) through near-black (0) to amber (positive).
+  const a = Math.min(1, Math.abs(v));
+  return v >= 0 ? `rgba(255,159,28,${0.08 + 0.85 * a})` : `rgba(74,158,255,${0.08 + 0.85 * a})`;
+}
+
+function renderRisk() {
+  const r = D.risk, s = D.backtest.summary;
+  const m = Math.max(0.5, ...Object.values(r.exposures).map(Math.abs));
+  const n = r.corr_syms.length;
+  $("riskb").innerHTML = `<div class="rgrid">
+      <div><span>Ex-ante vol</span>${pct(r.ex_ante_vol, 1, false)}</div><div><span>Book beta</span>${fmt(r.beta)}</div>
+      <div><span>Gross</span>${pct(r.gross, 0, false)}</div><div><span>Net</span>${pct(r.net, 0, false)}</div>
+      <div><span>1d VaR 95%</span>${money(r.var95)}</div><div><span>Bt CVaR 95%</span>${pct(s["CVaR 95% (1d)"], 2, false)}</div>
+    </div>
+    <table class="expo"><thead><tr><th>Factor exposure</th><th>Σ w·z</th><th></th></tr></thead><tbody>${
+      Object.entries(r.exposures).map(([k, v]) => `<tr><td>${k.replace("_", " ")}</td><td class="${cls(v)}">${fmt(v)}</td>
+      <td><div class="bar"><i style="left:${v < 0 ? 50 + (v / m) * 50 : 50}%;width:${Math.abs(v / m) * 50}%;background:${v < 0 ? css("--down") : css("--up")}"></i></div></td></tr>`).join("")}
+    </tbody></table>
+    <div class="legend"><span>63-day correlation, ${n} names</span><span><i style="background:rgba(74,158,255,.9)"></i>−1</span><span><i style="background:rgba(255,159,28,.9)"></i>+1</span></div>
+    <div class="corr" style="grid-template-columns:repeat(${n},1fr)">${
+      r.corr.flatMap((row, i) => row.map((v, j) => `<i style="background:${corrColor(v)}" title="${r.corr_syms[i]} / ${r.corr_syms[j]}: ${fmt(v)}"></i>`)).join("")}</div>`;
+}
+
+function renderMth() {
+  const m = D.backtest.monthly;
+  const shade = (v) => v == null ? "transparent" : v >= 0 ? `rgba(46,229,157,${Math.min(0.75, v * 8)})` : `rgba(255,90,79,${Math.min(0.75, -v * 8)})`;
+  $("mthb").innerHTML = `<table class="mth"><thead><tr><th>Year</th>${m.cols.map((c) => `<th>${c === "Year" ? "FY" : c}</th>`).join("")}</tr></thead><tbody>${
+    m.years.map((y, i) => `<tr><td class="s">${y}</td>${m.values[i].map((v, j) =>
+      `<td style="background:${m.cols[j] === "Year" ? "transparent" : shade(v)}" class="${m.cols[j] === "Year" ? cls(v) : ""}">${v == null ? "" : (v * 100).toFixed(1)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+}
+
+function renderStatus() {
+  const st = D.status;
+  $("asof").textContent = D.as_of;
+  $("mode").innerHTML = st.halted ? `<span class="badge halt">HALTED</span>`
+    : st.live_money ? `<span class="badge real">LIVE MONEY</span>` : `<span class="badge paper">PAPER · ${st.broker.toUpperCase()}</span>`;
+}
+
+function tick() {
+  const now = new Date();
+  const ny = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
+  $("ny").textContent = ny.toTimeString().slice(0, 8);
+  const mins = ny.getHours() * 60 + ny.getMinutes(), wd = ny.getDay();
+  const open = wd > 0 && wd < 6 && mins >= 570 && mins < 960;
+  $("mkt").innerHTML = open ? `<b class="open">NYSE open</b>` : `<b class="closed">NYSE closed</b>`;
+}
+
+function loadSym(s) {
+  if (!D.ohlc[s]) return false;
+  sym = s; renderGP(); renderMon();
+  try { history.replaceState(null, "", "#" + s); } catch (e) {}
+  return true;
+}
+
+function focusPanel(id) {
+  const el = $(id);
+  el.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "nearest" });
+  el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
+}
+
+function run(text) {
+  const t = text.trim().toUpperCase().replace(/<GO>/g, "").split(/\s+/).filter(Boolean);
+  if (!t.length) return;
+  if (t[0] === "HELP" || t[0] === "?") return $("help").showModal();
+  if (FUNCS[t[0]]) return focusPanel(FUNCS[t[0]]);
+  if (loadSym(t[0])) return focusPanel("gp");
+  $("cmd").value = ""; $("cmd").placeholder = `Unknown: ${t[0]}. Try a universe ticker or HELP.`;
+}
+
+$("cmdform").onsubmit = (e) => { e.preventDefault(); run($("cmd").value); $("cmd").value = ""; };
+$("fkeys").innerHTML = FKEYS.map(([k, f]) => `<button data-f="${f}"><b>${k}</b>${f}</button>`).join("");
+$("fkeys").querySelectorAll("button").forEach((b) => b.onclick = () => run(b.dataset.f));
+document.addEventListener("keydown", (e) => {
+  const fk = FKEYS.find(([k]) => k === e.key);
+  if (fk) { e.preventDefault(); return run(fk[1]); }
+  const typing = ["INPUT", "TEXTAREA"].includes(document.activeElement.tagName) || document.querySelector("dialog[open]");
+  if (!typing && e.key.length === 1 && /[a-z]/i.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) $("cmd").focus();
+});
+addEventListener("resize", () => {
+  for (const [c, el] of [[gpChart, $("gpc")], [pChart, $("pc")]]) if (c) c.applyOptions({ width: el.clientWidth });
+});
+
+async function load() {
+  try {
+    const r = await fetch("data.json?t=" + Date.now());
+    if (!r.ok) throw new Error(r.status);
+    D = await r.json();
+  } catch (e) {
+    $("asof").textContent = "unavailable";
+    if (!D) $("monb").innerHTML = `<p class="empty">Market data could not be loaded (${e.message}). The page retries every five minutes.</p>`;
+    return;
+  }
+  const h = location.hash.slice(1).toUpperCase();
+  if (h && D.ohlc[h]) sym = h;
+  renderStatus(); renderStrip(); renderMon(); renderGP(); renderPerf(); renderBook(); renderBltr(); renderSig(); renderRisk(); renderMth();
+}
+addEventListener("hashchange", () => D && loadSym(location.hash.slice(1).toUpperCase()));
+tick(); setInterval(tick, 1000);
+load(); setInterval(load, 5 * 60 * 1000);
+</script>
+</body>
+</html>
