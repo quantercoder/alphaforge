@@ -1,0 +1,15 @@
+[project]
+name = "alphaforge"
+version = "0.1.0"
+description = "Multi-factor equity strategy research engine with a Streamlit risk dashboard"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.26", "pandas>=2.2", "yfinance>=0.2.40", "plotly>=5.20", "streamlit>=1.35"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[tool.setuptools]
+packages = ["alphaforge"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
