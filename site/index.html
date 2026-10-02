@@ -305,8 +305,11 @@ function renderPerf() {
   } else {
     const a = D.account, first = a.curve[0] ?? a.equity, last = a.curve[a.curve.length - 1] ?? a.equity;
     const prev = a.curve.length > 1 ? a.curve[a.curve.length - 2] : first;
-    const k = [["Equity", money(a.equity)], ["Day P&L", money(last - prev)], ["Since start", pct(last / first - 1)],
-      ["Cash", money(a.cash)], ["Drawdown", pct(a.high_water ? a.equity / a.high_water - 1 : 0)], ["Days", a.curve.length]];
+    const dayPl = a.day_pl ?? last - prev;
+    const k = [["Equity", money(a.equity)], ["Day P&L", `<span class="${cls(dayPl)}">${money(dayPl)}</span>`],
+      ["Since start", pct(last / first - 1)], ["Cash", money(a.cash)],
+      a.buying_power != null ? ["Buying power", money(a.buying_power)] : ["Drawdown", pct(a.high_water ? a.equity / a.high_water - 1 : 0)],
+      ["Days", a.curve.length]];
     $("kpis").innerHTML = k.map(([x, y]) => `<div class="kpi"><div>${x}</div><div>${y}</div></div>`).join("");
     $("plegend").innerHTML = `<span><i style="background:${amber}"></i>Paper equity, marked at each close</span>`;
     pChart.addAreaSeries({ lineColor: amber, topColor: "rgba(255,159,28,.25)", bottomColor: "rgba(255,159,28,0)", lineWidth: 2 })
@@ -319,7 +322,9 @@ function renderBook() {
   $("eq").textContent = money(D.account.equity);
   if (!D.book.length) {
     const p = D.status.pending;
-    $("bookb").innerHTML = `<p class="empty">No positions yet. ${p ? `The ${p} rebalance fills at the next close.` : "The book opens at the next month-end signal."}</p>`;
+    const open = D.blotter.some((o) => ["new", "accepted", "pending_new", "partially_filled"].includes(o.status));
+    $("bookb").innerHTML = `<p class="empty">No positions yet. ${p ? `The ${p} rebalance fills at the next close.`
+      : open ? "Orders are queued at the broker and fill at the next market open." : "The book opens at the next month-end signal."}</p>`;
     return;
   }
   $("bookb").innerHTML = `<table><thead><tr><th>Ticker</th><th>Qty</th><th>Last</th><th>Value</th><th>Wt</th><th>P&L</th></tr></thead><tbody>${
@@ -329,9 +334,12 @@ function renderBook() {
 }
 
 function renderBltr() {
-  $("bltrb").innerHTML = D.blotter.length ? `<table><thead><tr><th>Date</th><th>Side</th><th>Ticker</th><th>Qty</th><th>Price</th><th>Status</th></tr></thead><tbody>${
+  const alpaca = D.status.broker === "alpaca";
+  const filled = (o) => o.filled ?? (o.status === "filled" ? o.qty : 0);
+  $("bltrb").innerHTML = D.blotter.length ? `<table><thead><tr><th>${alpaca ? "Time (UTC)" : "Date"}</th><th>Side</th><th>Ticker</th><th>Filled</th><th>Avg price</th><th>Value</th><th>Status</th></tr></thead><tbody>${
     D.blotter.map((o) => `<tr><td class="mut">${o.date}</td><td class="${o.qty > 0 ? "up" : "dn"}">${o.qty > 0 ? "BUY" : "SELL"}</td>
-      <td class="s">${o.symbol}</td><td>${fmt(Math.abs(o.qty), 0)}</td><td>${fmt(o.price)}</td><td class="mut">${o.status}</td></tr>`).join("")}</tbody></table>`
+      <td class="s">${o.symbol}</td><td>${fmt(Math.abs(filled(o)), 0)}<span class="mut">/${fmt(Math.abs(o.qty), 0)}</span></td>
+      <td>${fmt(o.price)}</td><td>${o.price ? money(Math.abs(filled(o)) * o.price) : "–"}</td><td class="mut">${o.status.replace("_", " ")}</td></tr>`).join("")}</tbody></table>`
     : `<p class="empty">No orders yet. Fills appear here after each rebalance.</p>`;
 }
 

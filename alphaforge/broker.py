@@ -9,6 +9,7 @@ Both expose the same four calls the trading job needs:
 import json
 import os
 import urllib.error
+from datetime import datetime, timezone
 import urllib.request
 
 
@@ -94,8 +95,36 @@ class AlpacaBroker:
         return float(self._req("GET", "/v2/account")["equity"])
 
     def positions(self):
-        return {p["symbol"]: {"qty": float(p["qty"]), "avg_cost": float(p["avg_entry_price"])}
+        return {p["symbol"]: {"qty": float(p["qty"]), "avg_cost": float(p["avg_entry_price"]),
+                              "last": float(p["current_price"])}
                 for p in self._req("GET", "/v2/positions")}
+
+    def account(self):
+        a = self._req("GET", "/v2/account")
+        return {"equity": float(a["equity"]), "cash": float(a["cash"]),
+                "buying_power": float(a["buying_power"]),
+                "day_pl": float(a["equity"]) - float(a["last_equity"])}
+
+    def orders(self, limit=150):
+        """Recent orders, newest first, in the blotter schema (qty signed, UTC timestamps)."""
+        out = []
+        for o in self._req("GET", f"/v2/orders?status=all&limit={limit}&direction=desc"):
+            sign = 1 if o["side"] == "buy" else -1
+            when = (o.get("filled_at") or o.get("submitted_at") or "")[:16].replace("T", " ")
+            out.append({"date": when, "symbol": o["symbol"], "qty": sign * float(o.get("qty") or 0),
+                        "filled": sign * float(o.get("filled_qty") or 0),
+                        "price": float(o["filled_avg_price"]) if o.get("filled_avg_price") else None,
+                        "status": o["status"]})
+        return out
+
+    def history(self):
+        """Daily equity for the past year as [(YYYY-MM-DD, equity)], skipping unfunded days."""
+        h = self._req("GET", "/v2/account/portfolio/history?period=1A&timeframe=1D")
+        return [(datetime.fromtimestamp(t, timezone.utc).date().isoformat(), e)
+                for t, e in zip(h.get("timestamp") or [], h.get("equity") or []) if e]
+
+    def cancel_open(self):
+        self._req("DELETE", "/v2/orders")
 
     def submit(self, symbol, qty, price=None):
         if qty == 0:

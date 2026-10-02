@@ -69,6 +69,10 @@ GitHub may delay scheduled runs by several minutes at busy times, and pauses sch
 2. Set the keys as environment variables on the machine that runs the job: `ALPACA_KEY_ID` and `ALPACA_SECRET_KEY`. In GitHub Actions, store them as repository **secrets**, never in the repo.
 3. Set `"broker": "alpaca"` in `live.json`.
 
+With Alpaca connected, the terminal reads everything from your account: the **Paper book** shows Alpaca's positions and prices, the **Order blotter** shows Alpaca's orders with filled quantity, average fill price and status, and the **Paper account** tab shows equity, cash, buying power, day P&L and Alpaca's own daily equity history. These refresh on every run (every 30 minutes in market hours). Before placing a new rebalance the job cancels any orders still open, so a rerun never doubles up.
+
+The strategy sizes positions from the account's total equity. If you trade the same paper account by hand, the next rebalance sells anything the strategy doesn't want, including your manual positions. Use a separate paper account for manual trading.
+
 ## Real money
 
 Two separate switches have to agree before an order reaches the live endpoint:

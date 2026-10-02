@@ -78,7 +78,7 @@ def build(raw, prices, bench, lc, broker, state_dir, out_path):
     pos = broker.positions()
     book = []
     for s, p in pos.items():
-        last = float(px.get(s, np.nan))
+        last = float(p.get("last", px.get(s, np.nan)))
         mv = p["qty"] * last
         book.append({"sym": s, "qty": p["qty"], "avg": p["avg_cost"], "last": last, "mv": mv,
                      "weight": mv / equity, "upl": (last - p["avg_cost"]) * p["qty"],
@@ -90,7 +90,14 @@ def build(raw, prices, bench, lc, broker, state_dir, out_path):
     curve = pd.read_csv(eq_path, index_col=0)["equity"] if os.path.exists(eq_path) else pd.Series(dtype=float)
     meta = json.load(open(f"{state_dir}/meta.json")) if os.path.exists(f"{state_dir}/meta.json") else {}
     blotter = []
-    if os.path.exists(f"{state_dir}/orders.jsonl"):
+    acct = {"equity": equity, "cash": getattr(broker, "cash", None)}
+    if hasattr(broker, "orders"):  # the broker is the source of truth for orders, fills and balances
+        blotter = broker.orders()
+        acct = broker.account()
+        eq_hist = broker.history()
+        if eq_hist:
+            curve = pd.Series(dict(eq_hist), dtype=float)
+    elif os.path.exists(f"{state_dir}/orders.jsonl"):
         with open(f"{state_dir}/orders.jsonl") as f:
             blotter = [json.loads(line) for line in f.readlines()[-150:]][::-1]
 
@@ -122,8 +129,7 @@ def build(raw, prices, bench, lc, broker, state_dir, out_path):
                         "values": mt.values.tolist()},
         },
         "signals": sig,
-        "account": {"equity": equity, "cash": getattr(broker, "cash", None),
-                    "high_water": meta.get("high_water"),
+        "account": {**acct, "high_water": meta.get("high_water"),
                     "dates": list(curve.index.astype(str)), "curve": curve.tolist()},
         "book": book,
         "blotter": blotter,

@@ -152,6 +152,7 @@ def run(lc, prices, state_dir="state", broker=None, today=None):
             meta["last_signal"] = d
             events.append("generated month-end signal")
             if broker.queues_orders:
+                broker.cancel_open()  # a rerun must not stack a second set of orders
                 fills += execute(broker, w, px, lc)  # broker fills at the next open
             else:
                 meta["pending"] = {"signal_date": d, "weights": w}  # fill at next close

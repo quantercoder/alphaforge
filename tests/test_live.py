@@ -4,7 +4,7 @@ import os
 import pandas as pd
 import pytest
 
-from alphaforge.broker import SimBroker
+from alphaforge.broker import AlpacaBroker, SimBroker
 from alphaforge.data import synthetic_prices
 from alphaforge.live import DEFAULTS, is_signal_day, plan_orders, run
 
@@ -73,3 +73,49 @@ def test_stale_data_refuses(tmp_path, lc):
     prices, _ = synthetic_prices(n_assets=12, n_days=400)
     with pytest.raises(RuntimeError, match="older than"):
         run({**lc, "max_data_age_days": 4}, prices, str(tmp_path), today="2030-01-01")
+
+
+class FakeAlpaca(AlpacaBroker):
+    """AlpacaBroker with canned REST responses; records every call."""
+
+    def __init__(self):
+        super().__init__("k", "s")
+        self.calls = []
+
+    def _req(self, method, path, body=None):
+        self.calls.append((method, path, body))
+        if path == "/v2/account":
+            return {"equity": "101000", "cash": "40000", "buying_power": "80000", "last_equity": "100000"}
+        if path == "/v2/positions":
+            return [{"symbol": "AAPL", "qty": "10", "avg_entry_price": "200", "current_price": "210"}]
+        if path.startswith("/v2/orders?"):
+            return [{"symbol": "AAPL", "side": "sell", "qty": "5", "filled_qty": "5", "filled_avg_price": "211.5",
+                     "status": "filled", "filled_at": "2026-10-05T13:30:02Z", "submitted_at": "2026-10-04T21:16:00Z"}]
+        if path.startswith("/v2/account/portfolio/history"):
+            return {"timestamp": [1790899200, 1790985600], "equity": [0, 101000]}
+        if method == "POST":
+            return {"id": "x", "status": "accepted"}
+        return None
+
+
+def test_alpaca_paper_is_default_endpoint():
+    assert FakeAlpaca().base == AlpacaBroker.PAPER
+
+
+def test_alpaca_normalization():
+    b = FakeAlpaca()
+    assert b.account() == {"equity": 101000.0, "cash": 40000.0, "buying_power": 80000.0, "day_pl": 1000.0}
+    assert b.positions()["AAPL"] == {"qty": 10.0, "avg_cost": 200.0, "last": 210.0}
+    o = b.orders()[0]
+    assert (o["qty"], o["filled"], o["price"], o["date"]) == (-5.0, -5.0, 211.5, "2026-10-05 13:30")
+    assert b.history() == [("2026-10-03", 101000)]  # unfunded day dropped
+
+
+def test_queued_broker_cancels_before_rebalance(tmp_path, lc):
+    prices, _ = synthetic_prices(n_assets=12, n_days=400, seed=3)
+    b = FakeAlpaca()
+    r = run(lc, prices, str(tmp_path), broker=b)
+    methods = [(m, p.split("?")[0]) for m, p, _ in b.calls]
+    first_post = methods.index(("POST", "/v2/orders"))
+    assert ("DELETE", "/v2/orders") in methods[:first_post]
+    assert r["fills"] and all(f["status"] == "accepted" for f in r["fills"])
