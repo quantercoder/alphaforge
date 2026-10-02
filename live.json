@@ -1,5 +1,5 @@
 {
-  "broker": "sim",
+  "broker": "alpaca",
   "live_money": false,
   "capital": 100000,
   "strategy": {"mode": "long_only", "target_vol": 0.12, "max_weight": 0.10, "max_leverage": 1.0},
