@@ -1,0 +1,26 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "cramped-padding",
+        "value": "*",
+        "files": [
+          "site/index.html"
+        ],
+        "createdAt": "2026-10-02T19:24:34.326Z",
+        "reason": "Claude triage: user asked for a Bloomberg-terminal style UI; dense 2-6px cell padding is the genre convention"
+      },
+      {
+        "rule": "flat-type-hierarchy",
+        "value": "*",
+        "files": [
+          "site/index.html"
+        ],
+        "createdAt": "2026-10-02T19:24:34.556Z",
+        "reason": "Claude triage: user asked for a Bloomberg-terminal style UI; uniform monospace data sizes are the genre convention"
+      }
+    ]
+  }
+}

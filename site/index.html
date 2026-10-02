@@ -114,6 +114,16 @@ dialog { background: #050403; color: var(--ink); border: 1px solid var(--amber);
 dialog::backdrop { background: rgba(0,0,0,.7); }
 dialog h3 { color: var(--amber); margin: 0 0 8px; font-size: 13px; }
 dialog code { color: var(--cmd); }
+dialog label { display: block; margin: 8px 0; color: var(--dim); }
+dialog input:not([type="checkbox"]) { display: block; width: 100%; margin-top: 3px; background: #000; color: var(--ink);
+  border: 1px solid #4a3410; font: 13px var(--f); padding: 5px 8px; }
+dialog .row { display: flex; gap: 8px; margin-top: 12px; }
+dialog .row button:not(.go) { border: 1px solid var(--rule); padding: 5px 10px; }
+#livebtn { cursor: pointer; font: inherit; }
+.live-off { color: var(--dim); } .live-connecting { color: var(--cmd); } .live-on { color: var(--up); } .live-error { color: var(--down); }
+.tick-up { background: rgba(46,229,157,.28); } .tick-dn { background: rgba(255,90,79,.28); }
+td.l, .tile .v, #gpx { transition: background .6s; }
+@media (prefers-reduced-motion: reduce) { td.l, .tile .v, #gpx { transition: none; } }
 
 @media (max-width: 1100px) {
   main { grid-template-columns: 1fr 1fr; grid-template-areas: "gp gp" "perf perf" "mon book" "mon bltr" "sig risk" "mth mth"; }
@@ -142,6 +152,7 @@ dialog code { color: var(--cmd); }
     <span>NY <b id="ny">--:--:--</b></span>
     <span>Data <b id="asof">loading</b></span>
     <span id="mode"></span>
+    <button id="livebtn" class="badge live-off" type="button">Delayed · connect live</button>
   </div>
 </header>
 <div class="strip" id="strip" aria-label="Markets"></div>
@@ -163,12 +174,26 @@ dialog code { color: var(--cmd); }
 <p class="foot">End-of-day and delayed data from Yahoo Finance. The book is a simulated paper account; nothing here is investment advice.
   <a href="https://github.com/z125081-Sam-Lam/alphaforge">Source</a> · <a href="https://github.com/z125081-Sam-Lam/alphaforge/blob/main/docs/MATH.md">Model</a></p>
 
+<dialog id="livedlg">
+  <h3>Live prices</h3>
+  <p>Streams real-time trades from Alpaca's free IEX feed into this page. Use the API key from an Alpaca <b>paper</b> account: it can read market data and can't touch real money.</p>
+  <form id="liveform" method="dialog">
+    <label>API key ID <input id="lk" autocomplete="off" spellcheck="false"></label>
+    <label>Secret key <input id="ls" type="password" autocomplete="off"></label>
+    <label><input type="checkbox" id="lremember"> Remember on this device</label>
+    <p class="mut">Keys go only to stream.data.alpaca.markets. They're saved in this browser only if you tick the box.</p>
+    <p class="mut" id="lerr"></p>
+    <div class="row"><button class="go" value="connect">Connect</button><button value="cancel">Cancel</button><button value="disconnect">Disconnect</button></div>
+  </form>
+</dialog>
+
 <dialog id="help">
   <h3>Commands</h3>
   <p>Type in the command line and press Enter (GO). Any key you press outside a field jumps to it.</p>
   <p><code>NVDA</code> or <code>NVDA GP</code>: chart a ticker<br>
   <code>MON</code> monitor · <code>PORT</code> book · <code>BLTR</code> orders · <code>SIG</code> signals<br>
-  <code>RISK</code> risk · <code>BT</code> backtest · <code>MTH</code> monthly · <code>HELP</code> this panel</p>
+  <code>RISK</code> risk · <code>BT</code> backtest · <code>MTH</code> monthly · <code>HELP</code> this panel<br>
+  <code>LIVE</code> connect real-time prices · <code>LIVE OFF</code> disconnect</p>
   <p>F1 to F8 map to the function bar. Data refreshes every five minutes.</p>
   <form method="dialog"><button class="go">Close</button></form>
 </dialog>
@@ -182,7 +207,7 @@ const big = (v) => v == null ? "–" : v >= 1e9 ? (v / 1e9).toFixed(1) + "B" : v
 const money = (v) => v == null ? "–" : (v < 0 ? "-$" : "$") + Math.abs(v).toLocaleString("en-US", { maximumFractionDigits: 0 });
 const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 
-let D = null, sym = "SPY", range = 130, ptab = "bt", gpChart, pChart;
+let D = null, sym = "SPY", range = 130, ptab = "bt", gpChart, pChart, gpSeries, gpBars = [];
 const FUNCS = { MON: "mon", PORT: "book", BLTR: "bltr", SIG: "sig", RISK: "risk", BT: "perf", MTH: "mth", GP: "gp" };
 const FKEYS = [["F1", "HELP"], ["F2", "MON"], ["F3", "GP"], ["F4", "PORT"], ["F5", "BLTR"], ["F6", "SIG"], ["F7", "RISK"], ["F8", "BT"]];
 
@@ -197,7 +222,7 @@ function chartOpts(el) {
 
 function renderStrip() {
   $("strip").innerHTML = Object.entries(D.strip).map(([k, q]) => q ? `
-    <div class="tile"><div class="n">${k}</div><div class="v">${fmt(q.last, q.last < 10 ? 4 : 2)}</div>
+    <div class="tile" data-k="${k}"><div class="n">${k}</div><div class="v">${fmt(q.last, q.last < 10 ? 4 : 2)}</div>
     <div class="c ${cls(q.pct)}">${fmt(q.chg, q.last < 10 ? 4 : 2)} ${pct(q.pct)}</div></div>` : "").join("");
 }
 
@@ -212,7 +237,7 @@ function renderMon() {
   const rows = Object.entries(D.quotes).filter(([, q]) => q).sort((a, b) => b[1].pct - a[1].pct);
   $("monb").innerHTML = `<table><thead><tr><th>Ticker</th><th>Last</th><th>Chg%</th><th>YTD</th><th>30d</th></tr></thead><tbody>${
     rows.map(([s, q]) => `<tr class="click ${s === sym ? "on" : ""}" data-s="${s}" tabindex="0">
-      <td class="s">${s}</td><td>${fmt(q.last)}</td><td class="${cls(q.pct)}">${pct(q.pct)}</td>
+      <td class="s">${s}</td><td class="l">${fmt(q.last)}</td><td class="${cls(q.pct)}">${pct(q.pct)}</td>
       <td class="${cls(q.ytd)}">${pct(q.ytd, 1)}</td><td>${spark(q.spark)}</td></tr>`).join("")}</tbody></table>`;
   $("monb").querySelectorAll("tr.click").forEach((tr) => {
     tr.onclick = () => loadSym(tr.dataset.s);
@@ -223,8 +248,8 @@ function renderMon() {
 function renderGP() {
   const q = D.quotes[sym], bars = (D.ohlc[sym] || []).slice(-range);
   const s = D.signals.find((x) => x.sym === sym);
-  $("ghead").innerHTML = `<b class="sym">${sym}</b><b class="px">${fmt(q.last)}</b>
-    <b class="${cls(q.pct)}">${fmt(q.chg)} ${pct(q.pct)}</b>
+  $("ghead").innerHTML = `<b class="sym">${sym}</b><b class="px" id="gpx">${fmt(q.last)}</b>
+    <b class="${cls(q.pct)}" id="gchg">${fmt(q.chg)} ${pct(q.pct)}</b>
     <span>52w <b>${fmt(q.lo52)} – ${fmt(q.hi52)}</b></span><span>Avg vol <b>${big(q.vol20)}</b></span>
     ${s ? `<span>Alpha <b class="${cls(s.alpha)}">${fmt(s.alpha)}</b></span><span>Target <b>${pct(s.target, 1, false)}</b></span>` : ""}`;
   $("range").innerHTML = [[22, "1M"], [65, "3M"], [130, "6M"], [260, "1Y"]].map(([n, l]) =>
@@ -234,12 +259,14 @@ function renderGP() {
   if (gpChart) gpChart.remove();
   gpChart = LightweightCharts.createChart(el, chartOpts(el));
   const up = css("--up"), dn = css("--down");
-  const c = gpChart.addCandlestickSeries({ upColor: up, downColor: dn, wickUpColor: up, wickDownColor: dn, borderVisible: false });
+  const c = gpSeries = gpChart.addCandlestickSeries({ upColor: up, downColor: dn, wickUpColor: up, wickDownColor: dn, borderVisible: false });
+  gpBars = bars;
   c.setData(bars.map(([t, o, h, l, cl]) => ({ time: t, open: o, high: h, low: l, close: cl })));
   const v = gpChart.addHistogramSeries({ priceFormat: { type: "volume" }, priceScaleId: "vol" });
   gpChart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
   v.setData(bars.map(([t, o, , , cl, vol]) => ({ time: t, value: vol, color: cl >= o ? "#1d5c43" : "#5c2420" })));
   gpChart.timeScale().fitContent();
+  if (LIVE.last[sym] != null) applyLive(sym, false);
 }
 
 function renderPerf() {
@@ -349,11 +376,12 @@ function tick() {
   const mins = ny.getHours() * 60 + ny.getMinutes(), wd = ny.getDay();
   const open = wd > 0 && wd < 6 && mins >= 570 && mins < 960;
   $("mkt").innerHTML = open ? `<b class="open">NYSE open</b>` : `<b class="closed">NYSE closed</b>`;
+  if (LIVE.status === "on") $("livebtn").textContent = open ? "LIVE · IEX" : "LIVE · market closed";
 }
 
 function loadSym(s) {
   if (!D.ohlc[s]) return false;
-  sym = s; renderGP(); renderMon();
+  sym = s; ensureSub(s); renderGP(); renderMon();
   try { history.replaceState(null, "", "#" + s); } catch (e) {}
   return true;
 }
@@ -368,6 +396,7 @@ function run(text) {
   const t = text.trim().toUpperCase().replace(/<GO>/g, "").split(/\s+/).filter(Boolean);
   if (!t.length) return;
   if (t[0] === "HELP" || t[0] === "?") return $("help").showModal();
+  if (t[0] === "LIVE") return t[1] === "OFF" ? disconnectLive() : openLiveDialog();
   if (FUNCS[t[0]]) return focusPanel(FUNCS[t[0]]);
   if (loadSym(t[0])) return focusPanel("gp");
   $("cmd").value = ""; $("cmd").placeholder = `Unknown: ${t[0]}. Try a universe ticker or HELP.`;
@@ -399,7 +428,159 @@ async function load() {
   const h = location.hash.slice(1).toUpperCase();
   if (h && D.ohlc[h]) sym = h;
   renderStatus(); renderStrip(); renderMon(); renderGP(); renderPerf(); renderBook(); renderBltr(); renderSig(); renderRisk(); renderMth();
+  for (const k of Object.keys(LIVE.last)) applyLive(k, false);
+  if (!LIVE.started) { LIVE.started = true; const c = savedCreds(); if (c) connectLive(c); }
 }
+// ---- Live prices: Alpaca market data (free IEX feed). Keys stay in this browser. ----
+const STOCK_WS = "wss://stream.data.alpaca.markets/v2/iex";
+const CRYPTO_WS = "wss://stream.data.alpaca.markets/v1beta3/crypto/us";
+const MAX_SYMS = 30; // Alpaca free plan: 30 symbols per stream
+const KEY_STORE = "alphaforge.alpaca";
+const LIVE = { status: "off", creds: null, ws: [], subs: [], last: {}, prevTick: {}, hi: {}, lo: {}, open: {}, dirty: new Set(), started: false };
+
+const nyDate = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+function savedCreds() { try { return JSON.parse(localStorage.getItem(KEY_STORE)); } catch (e) { return null; } }
+
+function setLive(status, note = "") {
+  LIVE.status = status;
+  const b = $("livebtn");
+  b.className = "badge live-" + status;
+  b.textContent = { off: "Delayed · connect live", connecting: "LIVE · connecting", on: "LIVE · IEX", error: "LIVE · error" }[status];
+  b.title = note;
+  $("lerr").textContent = status === "error" ? note : "";
+}
+
+function prevClose(s) {
+  // data.json written intraday already holds today's partial bar; written after a close, it doesn't.
+  if (s === "BTC") { const q = D.strip.BTC; return q && q.last - q.chg; }
+  const q = D.quotes[s];
+  return q && (q.date === nyDate() ? q.last - q.chg : q.last);
+}
+
+function openLiveDialog() {
+  const c = savedCreds() || LIVE.creds || {};
+  $("lk").value = c.key || ""; $("ls").value = c.secret || ""; $("lremember").checked = !!savedCreds();
+  $("livedlg").showModal();
+}
+
+$("livebtn").onclick = openLiveDialog;
+$("livedlg").addEventListener("close", () => {
+  const v = $("livedlg").returnValue;
+  if (v === "disconnect") return disconnectLive();
+  if (v !== "connect") return;
+  const creds = { key: $("lk").value.trim(), secret: $("ls").value.trim() };
+  if (!creds.key || !creds.secret) return setLive("error", "Enter both the key ID and the secret.");
+  try { $("lremember").checked ? localStorage.setItem(KEY_STORE, JSON.stringify(creds)) : localStorage.removeItem(KEY_STORE); } catch (e) {}
+  connectLive(creds);
+});
+
+function disconnectLive() {
+  LIVE.creds = null;
+  LIVE.ws.forEach((w) => w.close());
+  LIVE.ws = [];
+  setLive("off");
+}
+
+function connectLive(creds) {
+  LIVE.ws.forEach((w) => { w.onclose = null; w.close(); });
+  LIVE.creds = creds;
+  setLive("connecting");
+  LIVE.subs = [...new Set([sym, "SPY", ...D.signals.map((x) => x.sym)])].slice(0, MAX_SYMS);
+  LIVE.ws = [
+    stream(STOCK_WS, creds, (w) => { w.send(JSON.stringify({ action: "subscribe", trades: LIVE.subs })); setLive("on"); tick(); }),
+    stream(CRYPTO_WS, creds, (w) => w.send(JSON.stringify({ action: "subscribe", trades: ["BTC/USD"] }))),
+  ];
+}
+
+function stream(url, creds, onAuthed) {
+  const w = new WebSocket(url);
+  w.onopen = () => w.send(JSON.stringify({ action: "auth", key: creds.key, secret: creds.secret }));
+  w.onmessage = (e) => {
+    for (const m of JSON.parse(e.data)) {
+      if (m.T === "success" && m.msg === "authenticated") onAuthed(w);
+      else if (m.T === "t") trade(m.S === "BTC/USD" ? "BTC" : m.S, m.p);
+      else if (m.T === "error" && url === STOCK_WS) {
+        // 402 bad keys, 406 another connection open, 409 plan lacks this feed: retrying won't help.
+        if ([401, 402, 404, 406, 409].includes(m.code)) LIVE.creds = null;
+        setLive("error", `Alpaca ${m.code}: ${m.msg}`);
+      }
+    }
+  };
+  w.onclose = () => {
+    if (url !== STOCK_WS || !LIVE.creds || LIVE.creds !== creds) return;
+    setLive("connecting", "Connection dropped; retrying");
+    setTimeout(() => LIVE.creds === creds && connectLive(creds), 5000);
+  };
+  return w;
+}
+
+function ensureSub(s) {
+  const w = LIVE.ws[0];
+  if (LIVE.status !== "on" || !w || LIVE.subs.includes(s)) return;
+  const drop = LIVE.subs.find((x) => x !== "SPY" && x !== sym && x !== s);
+  if (LIVE.subs.length >= MAX_SYMS && drop) {
+    w.send(JSON.stringify({ action: "unsubscribe", trades: [drop] }));
+    LIVE.subs = LIVE.subs.filter((x) => x !== drop);
+  }
+  w.send(JSON.stringify({ action: "subscribe", trades: [s] }));
+  LIVE.subs.push(s);
+}
+
+function trade(s, p) {
+  if (LIVE.open[s] == null) LIVE.open[s] = p;
+  LIVE.hi[s] = Math.max(LIVE.hi[s] ?? p, p);
+  LIVE.lo[s] = Math.min(LIVE.lo[s] ?? p, p);
+  if (!LIVE.dirty.has(s)) LIVE.prevTick[s] = LIVE.last[s];
+  LIVE.dirty.add(s);
+  LIVE.last[s] = p;
+}
+
+function flash(el, dir) {
+  if (!el || !dir) return;
+  el.classList.remove("tick-up", "tick-dn");
+  el.classList.add(dir > 0 ? "tick-up" : "tick-dn");
+  setTimeout(() => el.classList.remove("tick-up", "tick-dn"), 600);
+}
+
+function applyLive(s, animate = true) {
+  const p = LIVE.last[s], pc = prevClose(s);
+  if (p == null || !pc) return;
+  const chg = p - pc, r = p / pc - 1, dir = animate ? Math.sign(p - (LIVE.prevTick[s] ?? p)) : 0;
+  if (s === "BTC") {
+    const t = document.querySelector('.tile[data-k="BTC"]');
+    if (!t) return;
+    t.querySelector(".v").textContent = fmt(p);
+    t.querySelector(".c").textContent = `${fmt(chg)} ${pct(r)}`;
+    t.querySelector(".c").className = "c " + cls(r);
+    return flash(t.querySelector(".v"), dir);
+  }
+  const tr = $("monb").querySelector(`tr[data-s="${s}"]`);
+  if (tr) {
+    tr.children[1].textContent = fmt(p);
+    tr.children[2].textContent = pct(r);
+    tr.children[2].className = cls(r);
+    flash(tr.children[1], dir);
+  }
+  if (s === sym) {
+    $("gpx").textContent = fmt(p);
+    $("gchg").textContent = `${fmt(chg)} ${pct(r)}`;
+    $("gchg").className = cls(r);
+    flash($("gpx"), dir);
+    if (gpSeries && gpBars.length) {
+      const today = nyDate(), lb = gpBars[gpBars.length - 1];
+      const same = lb[0] === today;
+      gpSeries.update({ time: today, open: same ? lb[1] : LIVE.open[s],
+        high: Math.max(same ? lb[2] : -Infinity, LIVE.hi[s]), low: Math.min(same ? lb[3] : Infinity, LIVE.lo[s]), close: p });
+    }
+  }
+}
+
+setInterval(() => {
+  if (!D) return;
+  for (const s of LIVE.dirty) applyLive(s);
+  LIVE.dirty.clear();
+}, 500);
+
 addEventListener("hashchange", () => D && loadSym(location.hash.slice(1).toUpperCase()));
 tick(); setInterval(tick, 1000);
 load(); setInterval(load, 5 * 60 * 1000);

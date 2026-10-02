@@ -31,6 +31,20 @@ python -m http.server 8600 --directory site   # open http://localhost:8600
 
 Run it once per weekday after 16:00 New York time. Running twice on the same day is safe: the equity row for that date is overwritten, and no new signal fires until the next month-end.
 
+## Automation (GitHub Actions)
+
+`.github/workflows/terminal.yml` runs on GitHub's servers:
+
+| When (UTC, Mon–Fri) | What |
+|---|---|
+| 21:15 | Trading run: `python -m alphaforge.live`, then commits `state/` (account, equity curve, orders) to `main` |
+| every 30 min, 13:00–20:30 | Quote refresh: `--quotes-only`, no trading |
+| on push to `site/`, `alphaforge/` or `live.json` | Quote refresh and redeploy |
+
+Every run redeploys the terminal to GitHub Pages. `state/` in git is the audit trail: each commit is one trading day. To pause automation, disable the workflow under **Actions → terminal → ⋯ → Disable workflow**. To stop trading but keep quotes, set the repository variable `ALPHAFORGE_KILL` to `1` (Settings → Secrets and variables → Actions → Variables).
+
+GitHub may delay scheduled runs by several minutes at busy times, and pauses schedules in repos with no activity for 60 days.
+
 ## Configuration: `live.json`
 
 ```json

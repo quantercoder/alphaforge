@@ -4,4 +4,4 @@ __pycache__/
 .venv/
 *.egg-info/
 .env
-state/
+site/data.json
