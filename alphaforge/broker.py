@@ -111,7 +111,7 @@ class AlpacaBroker:
         for o in self._req("GET", f"/v2/orders?status=all&limit={limit}&direction=desc"):
             sign = 1 if o["side"] == "buy" else -1
             when = (o.get("filled_at") or o.get("submitted_at") or "")[:16].replace("T", " ")
-            out.append({"date": when, "symbol": o["symbol"], "qty": sign * float(o.get("qty") or 0),
+            out.append({"date": when, "symbol": o["symbol"], "qty": sign * float(o.get("qty") or o.get("filled_qty") or 0),  # notional orders have no qty
                         "filled": sign * float(o.get("filled_qty") or 0),
                         "price": float(o["filled_avg_price"]) if o.get("filled_avg_price") else None,
                         "status": o["status"]})
