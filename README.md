@@ -18,12 +18,12 @@ python -m alphaforge.live         # one trading day (paper simulator by default)
 `site/index.html` is a static, keyboard-driven terminal hosted on GitHub Pages. It reads `site/data.json`, which `python -m alphaforge.live` writes.
 
 - Command line: type `NVDA` and press Enter to chart it. `PORT`, `SIG`, `RISK`, `BT`, `BLTR`, `MTH` and `HELP` jump to panels, and F1–F8 do the same.
-- Market strip (SPX, NDX, RTY, VIX, 10Y, DXY, gold, WTI, BTC, EURUSD), a sortable monitor with sparklines, and candlestick charts.
+- Market strip (SPX, NDX, RTY, VIX, 10Y, DXY, gold, WTI, BTC, EURUSD), and a monitor of the S&P 100 plus the strategy's names, with All / Strategy / Live tabs, sparklines and candlestick charts. The strategy trades only its 30 names; the rest are watch-only (`"watchlist"` in `live.json`).
 - The paper book, order blotter, per-name signals, ex-ante risk with factor exposures and a correlation matrix, the backtest and a monthly returns grid.
 
 **Data.** A GitHub Actions job (`.github/workflows/terminal.yml`) refreshes delayed Yahoo data every 30 minutes during market hours. After each close it trades the paper account, commits `state/` and redeploys the page.
 
-**Live prices.** Type `LIVE` or click the status chip, then paste an Alpaca paper-account API key. The page then streams real-time trades from Alpaca's free IEX feed for up to 30 symbols, plus BTC. Your key stays in your browser and is never sent to GitHub.
+**Live prices.** Type `LIVE` or click the status chip, then paste an Alpaca paper-account API key. The page then streams real-time trades from Alpaca's free IEX feed for up to 30 symbols, plus BTC. Every stock you open is live tracked; opening a 31st drops the one you opened longest ago. `LIVE LIST` shows the tracked set, which is remembered in your browser. Your key stays in your browser and is never sent to GitHub.
 
 ## Pipeline
 

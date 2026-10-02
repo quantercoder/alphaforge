@@ -9,6 +9,20 @@ DEFAULT_UNIVERSE = [
 ]
 
 
+# S&P 100 constituents (Yahoo symbols), approximate as of 2025. Watch-only: the strategy
+# trades DEFAULT_UNIVERSE. Edit "watchlist" in live.json to change what the terminal shows.
+SP100 = [
+    "AAPL", "ABBV", "ABT", "ACN", "ADBE", "AIG", "AMD", "AMGN", "AMT", "AMZN", "AVGO", "AXP",
+    "BA", "BAC", "BK", "BKNG", "BLK", "BMY", "BRK-B", "C", "CAT", "CHTR", "CL", "CMCSA",
+    "COF", "COP", "COST", "CRM", "CSCO", "CVS", "CVX", "DE", "DHR", "DIS", "DUK", "EMR",
+    "F", "FDX", "GD", "GE", "GILD", "GM", "GOOGL", "GS", "HD", "HON", "IBM", "INTC",
+    "INTU", "ISRG", "JNJ", "JPM", "KO", "LIN", "LLY", "LMT", "LOW", "MA", "MCD", "MDLZ",
+    "MDT", "MET", "META", "MMM", "MO", "MRK", "MS", "MSFT", "NEE", "NFLX", "NKE", "NOW",
+    "NVDA", "ORCL", "PEP", "PFE", "PG", "PLTR", "PM", "PYPL", "QCOM", "RTX", "SBUX", "SCHW",
+    "SO", "SPG", "T", "TGT", "TMO", "TMUS", "TSLA", "TXN", "UBER", "UNH", "UNP", "UPS",
+    "USB", "V", "VZ", "WFC", "WMT", "XOM",
+]
+
 # Cross-asset strip shown on the terminal: label -> Yahoo symbol.
 MARKET_STRIP = {
     "SPX": "^GSPC", "NDX": "^NDX", "RTY": "^RUT", "VIX": "^VIX", "UST10Y": "^TNX",

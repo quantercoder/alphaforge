@@ -59,6 +59,8 @@ GitHub may delay scheduled runs by several minutes at busy times, and pauses sch
 }
 ```
 
+`watchlist` (optional, defaults to the S&P 100) lists extra tickers the terminal shows. It doesn't change what the strategy trades; that's `universe`. Use Yahoo symbols, for example `BRK-B`.
+
 `strategy` accepts any `backtest.Config` field, so whatever you test in the dashboard can be run live unchanged. Keep `long_only` unless your broker account allows short selling.
 
 ## Connect Alpaca (paper)

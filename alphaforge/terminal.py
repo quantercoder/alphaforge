@@ -26,6 +26,8 @@ def _clean(o):
 
 
 def quote(raw, sym):
+    if sym not in raw["Close"]:
+        return None
     c = raw["Close"][sym].dropna()
     if len(c) < 2:
         return None
@@ -41,6 +43,8 @@ def quote(raw, sym):
 
 
 def ohlc(raw, sym, n=260):
+    if sym not in raw["Close"]:
+        return []
     df = pd.DataFrame({k: raw[k][sym] for k in ["Open", "High", "Low", "Close", "Volume"]}).dropna().iloc[-n:]
     return [[str(i.date()), *np.round(r[:4], 4), int(r[4])] for i, r in zip(df.index, df.values)]
 
@@ -50,6 +54,7 @@ def build(raw, prices, bench, lc, broker, state_dir, out_path):
     px = prices.iloc[-1]
     rets = prices.pct_change()
     universe = list(prices.columns)
+    shown = list(dict.fromkeys(universe + ["SPY"] + list(lc.get("watchlist", []))))
 
     # Research: full-history backtest with the live configuration.
     res = backtest.run_backtest(prices, strat, bench)
@@ -106,8 +111,9 @@ def build(raw, prices, bench, lc, broker, state_dir, out_path):
                    "pending": (meta.get("pending") or {}).get("signal_date"),
                    "rebalance": "month-end", "target_vol": strat.target_vol},
         "strip": {k: quote(raw, v) for k, v in MARKET_STRIP.items() if v in raw["Close"]},
-        "quotes": {s: quote(raw, s) for s in universe + ["SPY"]},
-        "ohlc": {s: ohlc(raw, s) for s in universe + ["SPY"]},
+        "universe": universe,
+        "quotes": {s: q for s in shown if (q := quote(raw, s))},
+        "ohlc": {s: b for s in shown if (b := ohlc(raw, s))},
         "backtest": {
             "summary": metrics.summary(res), "start": str(t0.date()),
             "dates": [str(i.date()) for i in weekly.index], "strategy": weekly["s"].tolist(),

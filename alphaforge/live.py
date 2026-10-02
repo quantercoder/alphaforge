@@ -18,13 +18,14 @@ from pandas.tseries.holiday import USFederalHolidayCalendar
 from . import backtest, signals
 from .backtest import Config
 from .broker import AlpacaBroker, SimBroker
-from .data import DEFAULT_UNIVERSE, MARKET_STRIP, download, load_prices
+from .data import DEFAULT_UNIVERSE, MARKET_STRIP, SP100, download, load_prices
 
 DEFAULTS = {
     "broker": "sim",              # sim | alpaca
     "live_money": False,          # alpaca only: true routes orders to the REAL-MONEY endpoint
     "capital": 100_000,           # sim starting cash
-    "universe": DEFAULT_UNIVERSE,
+    "universe": DEFAULT_UNIVERSE,  # what the strategy trades
+    "watchlist": SP100,            # extra names the terminal shows (watch-only)
     "history_start": "2014-01-01",
     "strategy": {"mode": "long_only"},  # any backtest.Config field
     "min_trade_notional": 200,    # skip dust trades (full closes always go through)
@@ -181,7 +182,12 @@ def main():
     a = ap.parse_args()
 
     lc = load_config(a.config)
-    raw = download(lc["universe"] + ["SPY"] + list(MARKET_STRIP.values()), lc["history_start"])
+    core = lc["universe"] + ["SPY"] + list(MARKET_STRIP.values())
+    raw = download(core, lc["history_start"])
+    extra = [s for s in lc["watchlist"] if s not in core]
+    if extra:  # watch-only names need ~1 year for charts and 52-week ranges, not the full backtest history
+        start = (pd.Timestamp.now() - pd.Timedelta(days=400)).strftime("%Y-%m-%d")
+        raw = pd.concat([raw, download(extra, start)], axis=1)
     prices, bench = load_prices(lc["universe"], None, raw=raw)
     broker = make_broker(lc, a.state)
     if not a.quotes_only:
