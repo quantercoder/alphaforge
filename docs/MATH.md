@@ -335,7 +335,19 @@ Filters, applied in this order:
 - **Simulator** (`SimBroker`): the order queued on signal day $\tau$ fills at the close of the next run day $\tau + 1$, at $P(1 \pm \kappa_{\text{slip}})$ plus commission $\kappa_{\text{comm}}\lvert qP\rvert$. That reproduces the backtest's timing (§10) exactly.
 - **Alpaca:** market, time-in-force *day*, submitted after the close, so they fill at the next open. This is about half a day earlier than the backtest assumes.
 
-### 13.4 Risk controls
+### 13.4 Two-week swap of the worst performers
+
+Between month-end rebalances the book is reviewed every $S$ trading days (`swap_every`, 10 in `live.json`), counted from the last rebalance or swap. With long holdings $\mathcal H$, entry (average) price $\bar P_i$ and current price $P_i$, the P&L since entry is $\pi_i = P_i/\bar P_i - 1$. Let $h_{(1)}, \dots, h_{(k)}$ be the $k$ holdings with the lowest $\pi$ (`swap_count`, 2), worst first, and let $c_{(1)}, c_{(2)}, \dots$ be the names *not* held, ranked by today's alpha. The rule pairs $h_{(j)}$ with $c_{(j)}$ and keeps a pair only if
+
+```math
+\alpha_{c_{(j)}} > \alpha_{h_{(j)}},
+```
+
+so the book never swaps into a name the model rates below the one it sells. Kept pairs are executed by selling $h_{(j)}$ entirely and splitting the proceeds evenly across the incoming names, so gross exposure is unchanged up to share rounding. Every other position is left as it is; the next month-end rebalance resizes the whole book. `portfolio.pick_swaps` implements the selection for both the backtest and the live job, with the same one-day lag as full rebalances.
+
+Selling on P&L since entry is path-dependent (it depends on when each name was bought), so it is not a cross-sectional signal like §3. It works as a disciplined loss-cutting overlay, with alpha deciding the replacements. In the default backtest (long-only, 2015 to 2026) it changed results from Sharpe 1.14 / CAGR 17.8% / turnover 6.8× to Sharpe 1.17 / CAGR 18.3% / turnover 9.3×. That improvement is well inside one standard error (§14).
+
+### 13.5 Risk controls
 
 The high-water mark is $H_t = \max_{s\le t} V_s$. The job flattens the book and writes a `state/KILL` file when
 

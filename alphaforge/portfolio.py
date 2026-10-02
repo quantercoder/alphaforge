@@ -58,6 +58,19 @@ def vol_target(w, cov, target_vol, max_leverage):
     return w * scale
 
 
+def pick_swaps(held_pnl, alpha_row, k):
+    """Pair the worst-k long holdings by P&L since entry with the best-alpha names not held.
+
+    The worst holding is paired with the best candidate, the second worst with the second best,
+    and a pair is kept only if the candidate's alpha beats the holding's. Returns (drop, add).
+    """
+    worst = sorted(held_pnl, key=held_pnl.get)[:k]
+    a = alpha_row.dropna()
+    cands = [s for s in a.sort_values(ascending=False).index if s not in held_pnl]
+    pairs = [(d, c) for d, c in zip(worst, cands) if a.get(c, -np.inf) > a.get(d, -np.inf)]
+    return [d for d, _ in pairs], [c for _, c in pairs]
+
+
 def target_weights(alpha_row, hist_returns, mode, max_weight, target_vol, max_leverage,
                    cov_shrink=0.3):
     """Full pipeline for one rebalance date. `hist_returns` must end at the signal date."""

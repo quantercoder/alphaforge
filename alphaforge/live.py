@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 from pandas.tseries.holiday import USFederalHolidayCalendar
 
-from . import backtest, signals
+from . import backtest, portfolio, signals
 from .backtest import Config
 from .broker import AlpacaBroker, SimBroker
 from .data import DEFAULT_UNIVERSE, MARKET_STRIP, SP100, download, load_prices
@@ -105,6 +105,27 @@ def execute(broker, weights, prices, lc):
     return [f for s, q in orders if (f := broker.submit(s, q, prices[s]))]
 
 
+def swap_due(index, meta, strat):
+    """True when `swap_every` trading days have passed since the last rebalance or swap."""
+    if not strat.swap_every or not meta.get("last_signal"):
+        return False
+    last = max(d for d in (meta.get("last_signal"), meta.get("last_swap")) if d)
+    return int((index > pd.Timestamp(last)).sum()) >= strat.swap_every
+
+
+def execute_swap(broker, drop, add, prices, lc):
+    """Sell `drop` entirely; the proceeds are split evenly across `add`. Sells go first."""
+    pos = broker.positions()
+    orders = [(s, -pos[s]["qty"]) for s in drop if s in pos and s in prices]
+    freed = sum(-q * float(prices[s]) for s, q in orders)
+    for s in add:
+        px = float(prices[s])
+        q = math.trunc(min(freed / len(add), lc["max_order_notional"]) / px)
+        if q > 0 and q * px >= lc["min_trade_notional"]:
+            orders.append((s, q))
+    return [f for s, q in orders if (f := broker.submit(s, q, prices[s]))]
+
+
 def run(lc, prices, state_dir="state", broker=None, today=None):
     """One trading day. Returns a report dict; persists account, equity curve, orders and meta."""
     os.makedirs(state_dir, exist_ok=True)
@@ -142,8 +163,12 @@ def run(lc, prices, state_dir="state", broker=None, today=None):
     else:
         p = meta["pending"]
         if p and not broker.queues_orders and d > p["signal_date"]:
-            fills += execute(broker, p["weights"], px, lc)
-            events.append(f"executed {p['signal_date']} rebalance")
+            if "drop" in p:
+                fills += execute_swap(broker, p["drop"], p["add"], px, lc)
+                events.append(f"executed {p['signal_date']} swap")
+            else:
+                fills += execute(broker, p["weights"], px, lc)
+                events.append(f"executed {p['signal_date']} rebalance")
             meta["pending"] = None
         if is_signal_day(date, meta["last_signal"]):
             alpha = signals.combine(signals.factor_scores(prices), strat.factor_weights)
@@ -156,6 +181,19 @@ def run(lc, prices, state_dir="state", broker=None, today=None):
                 fills += execute(broker, w, px, lc)  # broker fills at the next open
             else:
                 meta["pending"] = {"signal_date": d, "weights": w}  # fill at next close
+        elif swap_due(prices.index, meta, strat):
+            meta["last_swap"] = d
+            pos = broker.positions()
+            held = {s: float(px[s]) / p["avg_cost"] - 1 for s, p in pos.items()
+                    if p["qty"] > 0 and s in px and s in prices.columns and p["avg_cost"] > 0}
+            alpha = signals.combine(signals.factor_scores(prices), strat.factor_weights)
+            drop, add = portfolio.pick_swaps(held, alpha.iloc[-1], strat.swap_count)
+            events.append(f"swap check: drop {drop or 'none'}, add {add or 'none'}")
+            if drop and broker.queues_orders:
+                broker.cancel_open()
+                fills += execute_swap(broker, drop, add, px, lc)
+            elif drop:
+                meta["pending"] = {"signal_date": d, "drop": drop, "add": add}
 
     equity = broker.equity(px)
     meta["high_water"] = max(meta["high_water"], equity)

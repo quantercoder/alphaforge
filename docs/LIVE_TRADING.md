@@ -15,8 +15,9 @@ AlphaForge runs a daily job, `python -m alphaforge.live`, that turns the model's
 3. Marks the book to market and updates the high-water mark.
 4. **Halt check.** If equity is more than `max_drawdown_halt` below its peak, the job flattens the book and writes `state/KILL`. It does the same whenever `state/KILL` exists or `ALPHAFORGE_KILL=1` is set.
 5. Simulator only: fills the orders queued yesterday at today's close.
-6. On the last trading day of the month, computes target weights with the same function the backtest uses. Alpaca orders go out right away and fill at the next open. Simulator orders wait for the next run.
-7. Writes `state/equity.csv` and `state/orders.jsonl`, then rebuilds `site/data.json` for the terminal.
+6. Every 10 trading days between month-ends (`swap_every`), sells the 2 holdings with the worst P&L since purchase (`swap_count`) and buys the 2 highest-scoring stocks it doesn't own, provided each scores higher than the one it replaces. See [MATH.md §13.4](MATH.md#134-two-week-swap-of-the-worst-performers).
+7. On the last trading day of the month, computes target weights with the same function the backtest uses. Alpaca orders go out right away and fill at the next open. Simulator orders wait for the next run.
+8. Writes `state/equity.csv` and `state/orders.jsonl`, then rebuilds `site/data.json` for the terminal.
 
 The order-sizing math, filters and controls are specified in [MATH.md §13](MATH.md#13-live-execution).
 

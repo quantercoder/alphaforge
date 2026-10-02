@@ -2,7 +2,8 @@
   "broker": "alpaca",
   "live_money": false,
   "capital": 100000,
-  "strategy": {"mode": "long_only", "target_vol": 0.12, "max_weight": 0.10, "max_leverage": 1.0},
+  "strategy": {"mode": "long_only", "target_vol": 0.12, "max_weight": 0.10, "max_leverage": 1.0,
+               "swap_every": 10, "swap_count": 2},
   "min_trade_notional": 200,
   "max_order_notional": 25000,
   "max_drawdown_halt": 0.20

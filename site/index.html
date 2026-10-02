@@ -319,7 +319,7 @@ function renderPerf() {
 }
 
 function renderBook() {
-  $("eq").textContent = money(D.account.equity);
+  $("eq").textContent = money(D.account.equity) + (D.status.swap ? ` · month-end rebalance, swap ${D.status.swap}` : "");
   if (!D.book.length) {
     const p = D.status.pending;
     const open = D.blotter.some((o) => ["new", "accepted", "pending_new", "partially_filled"].includes(o.status));

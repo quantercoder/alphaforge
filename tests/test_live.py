@@ -1,9 +1,12 @@
 import json
 import os
 
+import numpy as np
 import pandas as pd
 import pytest
 
+from alphaforge import portfolio
+from alphaforge.backtest import Config, run_backtest
 from alphaforge.broker import AlpacaBroker, SimBroker
 from alphaforge.data import synthetic_prices
 from alphaforge.live import DEFAULTS, is_signal_day, plan_orders, run
@@ -119,3 +122,38 @@ def test_queued_broker_cancels_before_rebalance(tmp_path, lc):
     first_post = methods.index(("POST", "/v2/orders"))
     assert ("DELETE", "/v2/orders") in methods[:first_post]
     assert r["fills"] and all(f["status"] == "accepted" for f in r["fills"])
+
+
+def test_pick_swaps_pairs_worst_with_best():
+    alpha = pd.Series({"A": -1.0, "B": 0.5, "C": 2.0, "D": 1.5, "E": 0.1, "F": -0.5})
+    held = {"A": -0.10, "B": -0.05, "E": 0.20, "F": 0.01}
+    assert portfolio.pick_swaps(held, alpha, 2) == (["A", "B"], ["C", "D"])
+    # A replacement must outscore the holding it replaces.
+    assert portfolio.pick_swaps({"C": -0.3}, alpha, 2) == ([], [])
+
+
+def test_backtest_swaps_trade_and_stay_causal():
+    prices, _ = synthetic_prices(n_assets=20, n_days=900, seed=1)
+    cfg = Config(mode="long_only", swap_every=10, swap_count=2)
+    base = run_backtest(prices, Config(mode="long_only"))
+    swp = run_backtest(prices, cfg)
+    assert (swp.turnover > 0).sum() > (base.turnover > 0).sum()  # extra trade days from swaps
+    cut = 650
+    shocked = prices.copy()
+    shocked.iloc[cut + 1:] *= np.random.default_rng(0).uniform(0.5, 1.5, shocked.iloc[cut + 1:].shape)
+    pd.testing.assert_series_equal(swp.returns.iloc[: cut + 1], run_backtest(shocked, cfg).returns.iloc[: cut + 1])
+
+
+def test_live_swap_after_ten_days(tmp_path, lc):
+    """Month-start signal, fill next day, swap check 10 trading days later, swap fills the day after."""
+    prices, _ = synthetic_prices(n_assets=20, n_days=460, seed=1)
+    start = prices.index.get_loc(pd.Timestamp("2016-07-01"))
+    cfg = {**lc, "strategy": {"mode": "long_only", "swap_every": 10, "swap_count": 2}}
+    events = []
+    for i in range(start, start + 13):
+        events += run(cfg, prices.iloc[: i + 1], str(tmp_path))["events"]
+    check = next(e for e in events if e.startswith("swap check"))
+    assert check == "swap check: drop ['SYN12', 'SYN18'], add ['SYN09', 'SYN04']"
+    assert "executed 2016-07-15 swap" in events
+    held = json.load(open(os.path.join(str(tmp_path), "account.json")))["positions"]
+    assert {"SYN09", "SYN04"} <= set(held) and not {"SYN12", "SYN18"} & set(held)
