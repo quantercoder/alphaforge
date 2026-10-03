@@ -457,14 +457,19 @@ def next_dates(name, sc, strat, m, today, cbd):
     """When the next rebalance and swap check are due (calendar estimate)."""
     if name == "crypto":
         last = m.get("last_signal")
-        return {"rebalance": str((pd.Timestamp(last) + pd.Timedelta(days=sc["rebalance_days"])).date()) if last else str(today.date()),
-                "swap": None}
+        # The job runs on weekdays, so a due date on a weekend trades the next Monday.
+        due = pd.Timestamp(last) + pd.Timedelta(days=sc["rebalance_days"]) + pd.offsets.BDay(0) if last else None
+        return {"rebalance": str(due.date()) if due is not None else "next trading run", "swap": None}
     days = pd.date_range(today, today + pd.Timedelta(days=75), freq=cbd)
     last_p = pd.Period(m["last_signal"], "M") if m.get("last_signal") else None
     reb = next((d for d in days if (d + cbd).month != d.month and pd.Period(d, "M") != last_p), None)
     swap = None
-    if strat.swap_every and m.get("last_signal"):
+    if not m.get("last_signal"):
+        return {"rebalance": "next trading run", "swap": None}
+    if strat.swap_every:
         anchor = max(d for d in (m.get("last_signal"), m.get("last_swap")) if d)
-        swap = pd.Timestamp(anchor) + strat.swap_every * cbd
+        # The job counts trading days in the price data; plain weekdays match it better than the federal
+        # calendar, which closes on Columbus and Veterans Day when NYSE is open.
+        swap = pd.Timestamp(anchor) + strat.swap_every * pd.offsets.BDay()
         swap = max(swap, today)
     return {"rebalance": str(reb.date()) if reb is not None else None, "swap": str(swap.date()) if swap is not None else None}
