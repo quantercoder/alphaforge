@@ -198,6 +198,8 @@ function renderBook() {
     ["Unrealized", `<span class="${cls(t.upl)}">${smoney(t.upl)} <small>${pct(t.upl_pct)}</small></span>`],
     ["Today", `<span class="${cls(t.day_pl)}">${smoney(t.day_pl)}</span>`]].map(([x, y]) =>
     `<div class="kpi"><div>${x}</div><div>${y}</div></div>`).join("");
+  const fn = D.book.some((p) => p.cost_source === "order history") ? "* average cost rebuilt from your order history (the broker reported none). " : "";
+  const unk = t.unknown_cost ? `${t.unknown_cost} position(s) with no recorded cost are left out of unrealized P&L.` : "";
   if (!D.book.length) {
     const p = st.pending;
     $("bookb").innerHTML = `<p class="empty">No positions yet. ${p ? `The ${p} rebalance fills at the next close.`
@@ -207,11 +209,12 @@ function renderBook() {
   }
   $("bookb").innerHTML = `<table><thead><tr><th>${CRYPTO ? "Coin" : "Ticker"}</th><th>Qty</th><th>Avg</th><th>Last</th><th>Value</th><th>Wt</th><th>Today</th><th>Unrealized</th></tr></thead><tbody>${
     D.book.map((p) => `<tr class="click" data-s="${esc(p.sym)}" title="${esc(p.name)}"><td class="s">${esc(p.sym)}</td><td>${qty(p.qty)}</td>
-      <td>${price(p.avg)}</td><td class="lv" data-f="last">${price(p.last)}</td><td data-f="mv">${money(p.mv)}</td><td data-f="w">${pct(p.weight, 1, false)}</td>
+      <td title="${p.cost_source === "broker" ? "" : "Average cost: " + esc(p.cost_source)}">${p.avg == null ? '<span class="mut">unknown</span>' : price(p.avg)}${p.cost_source === "order history" ? '<small class="mut">*</small>' : ""}</td><td class="lv" data-f="last">${price(p.last)}</td><td data-f="mv">${money(p.mv)}</td><td data-f="w">${pct(p.weight, 1, false)}</td>
       <td data-f="day" class="${cls(p.day_pl)}">${smoney(p.day_pl)} <small class="mut">${pct(p.day_pct, 1)}</small></td>
-      <td data-f="upl" class="${cls(p.upl)}">${smoney(p.upl)} <small class="mut">${pct(p.upl_pct, 1)}</small></td></tr>`).join("")}</tbody>
+      <td data-f="upl" class="${cls(p.upl)}">${p.upl == null ? '<span class="mut">cost unknown</span>' : `${smoney(p.upl)} <small class="mut">${pct(p.upl_pct, 1)}</small>`}</td></tr>`).join("")}</tbody>
     <tfoot><tr><td>Total</td><td></td><td></td><td></td><td>${money(t.mv)}</td><td>${pct(t.weight, 1, false)}</td>
-      <td class="${cls(t.day_pl)}">${smoney(t.day_pl)}</td><td class="${cls(t.upl)}">${smoney(t.upl)} <small class="mut">${pct(t.upl_pct, 1)}</small></td></tr></tfoot></table>`;
+      <td class="${cls(t.day_pl)}">${smoney(t.day_pl)}</td><td class="${cls(t.upl)}">${smoney(t.upl)} <small class="mut">${pct(t.upl_pct, 1)}</small></td></tr></tfoot></table>
+    ${fn || unk ? `<p class="note">${fn}${unk}</p>` : ""}`;
   bindRows($("bookb"));
 }
 
@@ -219,11 +222,14 @@ function bookLive(s, p) {
   // Recompute one position's P&L from a live price, the way Alpaca does: unrealized vs cost, today vs last close.
   const r = D.book.find((x) => x.sym === s);
   if (!r) return false;
-  r.last = p; r.mv = r.qty * p; r.upl = r.mv - r.cost; r.upl_pct = r.cost ? r.upl / Math.abs(r.cost) : null;
+  r.last = p; r.mv = r.qty * p;
+  if (r.cost != null) { r.upl = r.mv - r.cost; r.upl_pct = r.cost ? r.upl / Math.abs(r.cost) : null; }
   if (r.lastday) { r.day_pl = (p - r.lastday) * r.qty; r.day_pct = p / r.lastday - 1; }
   r.weight = D.status.nav ? r.mv / D.status.nav : null;
   const t = D.totals;
-  ["mv", "cost", "upl", "day_pl"].forEach((k) => t[k] = D.book.reduce((a, x) => a + (x[k] || 0), 0));
+  ["mv", "day_pl"].forEach((k) => t[k] = D.book.reduce((a, x) => a + (x[k] || 0), 0));
+  const known = D.book.filter((x) => x.upl != null);
+  t.cost = known.reduce((a, x) => a + x.cost, 0); t.upl = known.reduce((a, x) => a + x.upl, 0);
   t.upl_pct = t.cost ? t.upl / Math.abs(t.cost) : null; t.weight = D.status.nav ? t.mv / D.status.nav : null;
   return true;
 }

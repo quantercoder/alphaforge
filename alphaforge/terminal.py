@@ -60,6 +60,45 @@ def ohlc(raw, ysym, n=260):
 
 # ---------------------------------------------------------------- book, blotter
 
+def average_costs(fills):
+    """Average-cost basis per symbol rebuilt from fills (oldest first): {symbol: (qty, avg_cost)}.
+
+    Buys move the average; sells reduce the quantity at the same average; a position that goes
+    flat starts over. Used when the broker reports a zero cost basis."""
+    book = {}
+    for f in fills:
+        q, avg = book.get(f["symbol"], (0.0, 0.0))
+        n = f["qty"]
+        if n > 0:
+            avg = (q * avg + n * f["price"]) / (q + n) if q + n else 0.0
+        q += n
+        if abs(q) < 1e-9:
+            q, avg = 0.0, 0.0
+        book[f["symbol"]] = (q, avg)
+    return book
+
+
+def repair_costs(positions, broker):
+    """Fill in a zero average cost from the order history when the history explains the position.
+
+    Crypto fees are paid in coin, so the position is a little smaller than the sum of fills; allow 3%.
+    If the history doesn't explain the quantity, the cost stays unknown instead of being invented."""
+    broken = [s for s, p in positions.items() if not p.get("avg_cost")]
+    if not broken or not hasattr(broker, "fills"):
+        return positions
+    rebuilt = average_costs(broker.fills("2015-01-01T00:00:00Z"))
+    out = dict(positions)
+    for s in broken:
+        p = {**positions[s], "cost_basis": None, "upl": None, "upl_pct": None}
+        q, avg = rebuilt.get(s, (0.0, 0.0))
+        if avg > 0 and q and abs(q - p["qty"]) <= 0.03 * abs(p["qty"]):
+            p["avg_cost"], p["cost_basis"], p["cost_source"] = avg, p["qty"] * avg, "order history"
+        else:
+            p["cost_source"] = "unknown"
+        out[s] = p
+    return out
+
+
 def book_rows(positions, nav, px, prev):
     """Per-position P&L in the units Alpaca shows. Broker fields win; the rest is computed."""
     rows = []
@@ -69,21 +108,27 @@ def book_rows(positions, nav, px, prev):
             continue
         qty, avg = p["qty"], p["avg_cost"]
         mv = p.get("mv") or qty * last
-        cost = p.get("cost_basis") or qty * avg
-        upl = p["upl"] if p.get("upl") is not None else mv - cost
+        known = p.get("cost_source") != "unknown"
+        cost = (p.get("cost_basis") or qty * avg) if known else None
+        upl = p["upl"] if p.get("upl") is not None else (mv - cost if known else None)
         lastday = p.get("lastday") or (float(prev[s]) if s in prev else None)
         day = p["day_pl"] if p.get("day_pl") is not None else ((last - lastday) * qty if lastday else None)
         if p.get("day_pl") is not None and qty:
             # Alpaca measures today's P&L from the entry price for shares bought today. Back out the
             # reference price it used, so live ticks in the browser reproduce Alpaca's number.
             lastday = last - p["day_pl"] / qty
-        rows.append({"sym": s, "name": name(s), "qty": qty, "avg": avg, "last": last, "mv": mv,
+        rows.append({"sym": s, "name": name(s), "qty": qty, "avg": avg if known else None, "last": last, "mv": mv,
                      "cost": cost, "weight": mv / nav if nav else None, "upl": upl,
-                     "upl_pct": upl / abs(cost) if cost else None, "day_pl": day, "lastday": lastday,
-                     "day_pct": (last / lastday - 1) if lastday else None})
+                     "upl_pct": upl / abs(cost) if cost and upl is not None else None, "day_pl": day,
+                     "lastday": lastday, "day_pct": (last / lastday - 1) if lastday else None,
+                     "cost_source": p.get("cost_source", "broker")})
     rows.sort(key=lambda x: -abs(x["mv"]))
-    tot = {k: sum(r[k] or 0 for r in rows) for k in ("mv", "cost", "upl", "day_pl")}
+    tot = {k: sum(r[k] or 0 for r in rows) for k in ("mv", "day_pl")}
+    priced = [r for r in rows if r["upl"] is not None]  # unrealized P&L only where the cost is known
+    tot["cost"] = sum(r["cost"] for r in priced)
+    tot["upl"] = sum(r["upl"] for r in priced)
     tot["upl_pct"] = tot["upl"] / abs(tot["cost"]) if tot["cost"] else None
+    tot["unknown_cost"] = len(rows) - len(priced)
     tot["weight"] = tot["mv"] / nav if nav else None
     return rows, tot
 
@@ -117,7 +162,8 @@ def blotter_rows(broker, cls, sleeve, state_dir):
             slips.append(slip)
         out.append({"time": o["time"], "symbol": o["symbol"], "qty": o["qty"], "filled": o.get("filled"),
                     "price": o.get("price"), "status": o["status"], "ref": ref, "slip_bps": slip,
-                    "auto": (o.get("client_id") or "").startswith("af-")})
+                    "auto": (o.get("client_id") or "").startswith("af-") or o.get("id") in refs
+                    or not hasattr(broker, "orders")})
     return out, (float(np.mean(slips)) if slips else None, len(slips))
 
 
@@ -230,7 +276,7 @@ def equity_page(raw, prices, bench, lc, broker, state_dir, meta, nv, account, no
     sig.sort(key=lambda x: -(x["alpha"] if x["alpha"] == x["alpha"] else -9))
 
     nav = nv["equity"]
-    pos = {s: p for s, p in nv["positions"].items() if p["cls"] == "us_equity"}
+    pos = repair_costs({s: p for s, p in nv["positions"].items() if p["cls"] == "us_equity"}, broker)
     book, totals = book_rows(pos, nav, prices.iloc[-1], prices.iloc[-2])
     w = pd.Series({x["sym"]: x["weight"] for x in book if x["sym"] in universe}, dtype=float).reindex(universe).fillna(0)
     risk = risk_block(w, rets, bench.pct_change(), nav, 252, strat.cov_lookback, -0.10, "S&P 500 -10%",
@@ -280,7 +326,7 @@ def crypto_page(craw, cprices, lc, broker, state_dir, meta, nv, account, now):
     sig.sort(key=lambda x: (-(x["alpha"] if x["alpha"] == x["alpha"] else -9), -x["r60"]))
 
     nav = nv.get("crypto") or cc["budget"]
-    pos = {s: p for s, p in nv["positions"].items() if p["cls"] == "crypto"}
+    pos = repair_costs({s: p for s, p in nv["positions"].items() if p["cls"] == "crypto"}, broker)
     book, totals = book_rows(pos, nav, cprices.iloc[-1], cprices.iloc[-2])
     w = pd.Series({x["sym"]: x["weight"] for x in book if x["sym"] in universe}, dtype=float).reindex(universe).fillna(0)
     risk = risk_block(w, rets, btc.pct_change(), nav, 365, strat.cov_lookback, -0.20, "Bitcoin -20%",

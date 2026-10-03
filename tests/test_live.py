@@ -287,3 +287,20 @@ def test_live_swap_after_ten_days(tmp_path, lc):
     assert "executed 2016-07-15 swap" in events
     held = _held(str(tmp_path))
     assert {"SYN09", "SYN04"} <= set(held) and not {"SYN12", "SYN18"} & set(held)
+
+
+def test_average_cost_rebuilt_from_fills():
+    from alphaforge.terminal import average_costs, repair_costs
+    fills = [{"symbol": "SOL/USD", "qty": 10, "price": 100.0}, {"symbol": "SOL/USD", "qty": 10, "price": 120.0},
+             {"symbol": "SOL/USD", "qty": -5, "price": 130.0}, {"symbol": "ETH/USD", "qty": 1, "price": 2000.0},
+             {"symbol": "ETH/USD", "qty": -1, "price": 2100.0}, {"symbol": "ETH/USD", "qty": 2, "price": 2500.0}]
+    assert average_costs(fills) == {"SOL/USD": (15, 110.0), "ETH/USD": (2, 2500.0)}
+
+    class B:
+        def fills(self, since):
+            return fills
+    pos = {"SOL/USD": {"qty": 14.96, "avg_cost": 0.0, "cls": "crypto"},   # within fee tolerance
+           "ETH/USD": {"qty": 5.0, "avg_cost": 0.0, "cls": "crypto"}}     # history can't explain it
+    fixed = repair_costs(pos, B())
+    assert fixed["SOL/USD"]["avg_cost"] == 110.0 and fixed["SOL/USD"]["cost_source"] == "order history"
+    assert fixed["ETH/USD"]["cost_source"] == "unknown" and fixed["ETH/USD"]["upl"] is None
