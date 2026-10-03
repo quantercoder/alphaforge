@@ -20,6 +20,7 @@ This document specifies every quantity the engine computes, in the order the cod
 14. [Statistical caveats](#14-statistical-caveats)
 15. [Parameter reference](#15-parameter-reference)
 16. [The crypto sleeve](#16-the-crypto-sleeve)
+17. [Desk analytics](#17-desk-analytics): factor risk model, attribution, stress, liquidity, limits, TCA, signal diagnostics, approval and audit, next-trade preview, data health
 
 ---
 
@@ -401,6 +402,8 @@ The high-water mark is $H_t = \max_{s\le t} V_s$. The job flattens the book and 
 
 with $d_{\max}$ = `max_drawdown_halt` (20% equities, 50% crypto, set beyond each backtest's worst drawdown so normal swings don't trip it). Trading resumes only after a person deletes that file. The terminal shows how much of the distance to the halt has been used. Halts, rejected orders and broker cancellations are written to `alerts.txt`, and the GitHub job fails on them, which emails the repository owner. The job also halts on `ALPHAFORGE_KILL=1` (all sleeves) or `ALPHAFORGE_KILL=equity` / `crypto` (one sleeve), and it refuses to trade on prices older than `max_data_age_days`. Real-money trading needs both `"live_money": true` in `live.json` **and** `ALPHAFORGE_CONFIRM_LIVE=yes` in the environment.
 
+Optionally, every rebalance and swap can wait for a person's approval, and every trading run is written to an audit log ([§17.6](#176-approval-audit-permissions)).
+
 ## 14. Statistical caveats
 
 **Standard error of the Sharpe ratio.** For iid returns over $Y$ years, $\operatorname{SE}(\widehat{SR}) \approx \sqrt{(1 + \widehat{SR}^2/2)/Y}$ (Lo, 2002). Over 11.7 years with $\widehat{SR} = 0.2$, the SE is about 0.30, so the market-neutral book's Sharpe ratio isn't distinguishable from zero. At $\widehat{SR} = 1.1$, SE ≈ 0.37, which is significant but wide.
@@ -437,6 +440,22 @@ with $d_{\max}$ = `max_drawdown_halt` (20% equities, 50% crypto, set beyond each
 | Drawdown halt $d_{\max}$ | 20% equities, 50% crypto | `live.json` |
 | Risk-free rate | 13-week T-bill (`^IRX`), lagged a day | `data.risk_free` |
 | Crypto budget $B$ | \$10,000 | `live.json` → `crypto.budget` |
+| Swap interval $S$ / count $k$ | 10 trading days / 2 names | `Config.swap_every`, `swap_count` |
+| Approval before trading | off | `live.json` → `require_approval` |
+| **Desk analytics (§17)** | | |
+| Risk-model universe | strategy names + watchlist (S&P 100) | `terminal.equity_page` |
+| Risk-model window / EWMA half-life | 252 days (crypto 365) / 90 days | `analytics.risk_model` |
+| Sector constraint weight | $10^3$ (sum of sector returns = 0) | `analytics.risk_model` |
+| Active-risk benchmark | equal weight of the 30 names; crypto: 100% BTC | `terminal.equity_page`, `crypto_page` |
+| ADV window / participation | 20 days / 10% | `terminal._adv_usd`, `analytics.liquidity`, `capacity` |
+| Traffic lights | green $u<0.9$, amber $0.9\le u<1$, red $u\ge1$ | `analytics.light` |
+| Soft limits (equities) | sector 40%, beta 1.2, VaR 2.5% of NAV, TE 12%, vol 1.5×target, 1 day to exit | `terminal.LIMITS` |
+| Soft limits (crypto) | beta to BTC 1.5, VaR 8% of NAV, vol 1.5×target, 1 day to exit | `terminal.LIMITS` |
+| Position-limit drift tolerance | 1.2 × `max_weight` | `terminal.LIMITS` |
+| IC horizons | 1, 5, 21, 63 days (crypto 1, 7, 30, 90) | `analytics.signal_ic` |
+| Crowding window / history | 63 days / 36 month-ends | `analytics.crowding` |
+| Factor shock | 3σ over 21 days | `terminal.desk_block` |
+| Corporate-action flag | daily move > 25% (crypto 50%) in 10 sessions | `analytics.data_health` |
 
 ## 16. The crypto sleeve
 
@@ -529,6 +548,49 @@ in basis points, positive = cost. Participation is shares filled divided by the 
 ### 17.6 Approval, audit, permissions
 
 With `"require_approval": true` in `live.json` (or under `"crypto"`), a due rebalance or swap is not traded: the sleeve records `awaiting`, raises one alert and checks again every run, so a month-end rebalance is not lost. A run with `ALPHAFORGE_APPROVE=equity|crypto|all` (the workflow's *approve* input) executes it. Every trading run appends to `state/audit.jsonl` (time, GitHub actor, trigger, run id, commit, events, order count, alerts) and alerts to `state/alerts.jsonl`, both committed with the state.
+
+The approval gate, per sleeve and per run (`live.step_sleeve`):
+
+```
+due_rebalance = signal_due(today) or awaiting.kind == "rebalance"
+due_swap      = not due_rebalance and swap_due(today)
+if (due_rebalance or due_swap) and require_approval and ALPHAFORGE_APPROVE not in {sleeve, "all"}:
+    if awaiting.kind changed: raise one alert
+    awaiting = {kind, since}            # last_signal / last_swap are NOT advanced
+else if due_rebalance or due_swap:
+    awaiting = none; trade as usual (logged as "approved by <GitHub user>" when approval was required)
+```
+
+Because `last_signal` is not advanced while waiting, a month-end rebalance approved days later still runs with that day's data, and a swap stays due until it is approved. Permissions are GitHub's: only the Actions job holds the broker keys, and only collaborators with write access can start a run with *approve*.
+
+### 17.7 Next-trade preview
+
+`terminal.preview_block` runs the trading job's own functions on today's data, without sending anything:
+
+1. Targets $w^\star$ = `targets_at(alpha, returns, today)`, exactly as a signal day would compute them.
+2. Orders = `plan_orders(w*, positions, NAV, prices, sleeve config)`: the same truncation, dust filter, fat-finger cap, sign-flip split, ordering and crypto cash buffer as §13.2.
+3. Swap (equities) = `pick_swaps(P&L since entry, alpha, k)` then `swap_orders(...)`, as in §13.4.
+4. For each order list: buys $\sum_{\Delta>0}\Delta P$, sells, turnover $\sum|\Delta P|/V$, estimated cost $\sum|\Delta P|\,(\kappa_{\text{comm}}+\kappa_{\text{slip}})$, and the post-trade book: gross $\sum|w|$, largest weight, largest sector, number of names. An order cut to `max_order_notional` is flagged *capped*.
+
+**Dates.** The next rebalance for equities is the first business day $d$ (federal calendar, as in §13.1) with $d+1$ in a new month and $\text{month}(d) \ne \text{month}(\text{last signal})$. The next swap check is the later of the last rebalance or swap plus $S$ weekdays: the job counts trading days in the price data, which plain weekdays match better than the federal calendar (NYSE is open on Columbus and Veterans Day). For crypto it is the last signal plus 7 days, rolled forward to a weekday because the job only runs Monday to Friday. Before a sleeve's first signal both read "next trading run". The real run trades at that day's close, so quantities will differ from the preview by that day's price moves.
+
+### 17.8 Data health checks
+
+`analytics.data_health` runs on every build. Each check is ok, warn or fail:
+
+| Check | Rule |
+|---|---|
+| Price history fresh | business days between the latest close and the expected one: 0 ok, 1 warn, more fail. Expected = today once NYSE has opened on a trading day, else the previous trading day; for crypto, yesterday (UTC), because today's bar is still forming |
+| Quotes complete | every shown symbol's last quote date equals the latest close, else warn with the laggards |
+| No missing prices | every strategy name has a finite price on the latest row, else fail |
+| No stale prices | no strategy name has an unchanged close for 6 rows, else warn |
+| Corporate actions / bad ticks | no daily move above 25% (crypto 50%) in 10 sessions, else warn with the date and size. Prices are split- and dividend-adjusted by Yahoo, so a flagged jump is either real news or a data error |
+| Positions reconcile to fills | each broker position matches the quantity rebuilt from the full fill history (§13.3) within 3% (crypto fees are paid in coin), else warn |
+| Cash + positions = equity | Alpaca only: $|E - C - \sum MV| \le 0.5\% \cdot E$ |
+| No stuck orders | no order still open (new, accepted, partially filled, held) after one day |
+| Trading job ran | last trading run within 4 days (covers weekends and one holiday) |
+
+The browser adds two live checks: the terminal data's age (ok under 45 minutes, or under 3 days while NYSE is closed, because the refresh only runs in market hours) and the live feed's last tick (ok under 60 seconds, or anytime while NYSE is closed). A failing check is also listed under Alerts.
 
 ## References
 

@@ -27,8 +27,9 @@ For each sleeve:
 4. **Halt check.** If the sleeve's NAV is more than `max_drawdown_halt` below its peak, the job flattens that sleeve and writes `state/KILL` (equities) or `state/KILL_CRYPTO`. It does the same whenever that file exists or `ALPHAFORGE_KILL` is `1` (all sleeves), `equity` or `crypto`.
 5. Simulator only: fills the orders queued yesterday at today's close.
 6. Every 10 trading days between month-ends (`swap_every`), sells the 2 holdings with the worst P&L since purchase (`swap_count`) and buys the 2 highest-scoring stocks it doesn't own, provided each scores higher than the one it replaces. See [MATH.md §13.4](MATH.md#134-two-week-swap-of-the-worst-performers).
-7. On its signal day (month-end for equities, every 7 days for crypto), computes target weights with the same function the backtest uses. Alpaca equity orders fill at the next open; crypto orders fill immediately. Simulator orders wait for the next run.
-8. Writes `state/equity.csv` (account and both sleeve NAVs) and `state/orders.jsonl`, checks the broker for rejected or canceled orders, then rebuilds `site/data.json` and `site/crypto.json`.
+7. On its signal day (month-end for equities, every 7 days for crypto), computes target weights with the same function the backtest uses and stores them (the terminal's drift column compares against them). Alpaca equity orders fill at the next open; crypto orders fill immediately. Simulator orders wait for the next run.
+   - With `require_approval` on, a due rebalance or swap is held instead: the sleeve is marked *awaiting*, one alert goes out, and it trades on the first run started with *approve* ([MATH.md §17.6](MATH.md#176-approval-audit-permissions)).
+8. Writes `state/equity.csv` (account and both sleeve NAVs), `state/orders.jsonl`, `state/audit.jsonl` (one line per run: who, how, which commit, what happened) and `state/alerts.jsonl`, checks the broker for rejected or canceled orders, then rebuilds `site/data.json` and `site/crypto.json` with the desk analytics ([MATH.md §17](MATH.md#17-desk-analytics)).
 
 **Alerts.** A drawdown halt, a rejected order, or a broker cancellation of one of the job's orders is written to `alerts.txt`, and the GitHub job then fails on purpose. GitHub emails the repository owner about failed scheduled runs, so a problem reaches you without watching the site. The page still deploys and the state is still committed first.
 
@@ -56,6 +57,7 @@ Run it once per weekday after 16:00 New York time. Running twice on the same day
 | 21:15 | Trading run: `python -m alphaforge.live`, then commits `state/` (account, equity curve, orders) to `main` |
 | every 30 min, 13:00–20:30 | Quote refresh: `--quotes-only`, no trading |
 | on push to `site/`, `alphaforge/` or `live.json` | Quote refresh and redeploy |
+| Run workflow (manual) | *trade*: run the trading step now. *approve*: `equity`, `crypto` or `all` releases a rebalance or swap waiting for approval and trades it |
 
 Every run redeploys the terminal to GitHub Pages. `state/` in git is the audit trail: each commit is one trading day. To pause automation, disable the workflow under **Actions → terminal → ⋯ → Disable workflow**. To stop trading but keep quotes, set the repository variable `ALPHAFORGE_KILL` to `1` (Settings → Secrets and variables → Actions → Variables).
 
@@ -134,3 +136,6 @@ If any point fails, stay on paper. That decision is yours; this repository will 
 - Reconciliation is by alert, not repair: rejected, canceled or expired orders raise an alert, and the next rebalance re-targets the book. There is no intraday retry.
 - The Alpaca account pays no interest on cash, while the backtest credits idle cash with the T-bill rate.
 - Whole shares only, which leaves up to one share of tracking error per name.
+- The factor risk model and the limits are for monitoring. Portfolio construction still uses the shrunk covariance and caps of [MATH.md §6–9](MATH.md#6-from-alpha-to-weights); sector, beta and turnover are not constrained by an optimizer, so a soft limit can stay red until the next rebalance changes the book.
+- The risk model's styles are price-based (no fundamentals), estimated on today's S&P 100 members, with watch-only names downloaded from about 800 days back.
+- Approval is a GitHub workflow run, not a button on the page: the page holds no credentials, so it cannot start a run itself.
