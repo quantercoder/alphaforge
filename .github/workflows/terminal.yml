@@ -14,6 +14,11 @@ on:
         description: "Run the trading step (otherwise refresh quotes only)"
         type: boolean
         default: false
+      approve:
+        description: "Approve the waiting rebalance/swap (when require_approval is on) and trade now"
+        type: choice
+        options: [none, equity, crypto, all]
+        default: none
 
 permissions:
   contents: write
@@ -44,8 +49,9 @@ jobs:
           ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
           ALPHAFORGE_CONFIRM_LIVE: ${{ vars.ALPHAFORGE_CONFIRM_LIVE }}
           ALPHAFORGE_KILL: ${{ vars.ALPHAFORGE_KILL }}
+          ALPHAFORGE_APPROVE: ${{ inputs.approve != 'none' && inputs.approve || '' }}
         run: |
-          if [ "${{ github.event.schedule }}" = "15 21 * * 1-5" ] || [ "${{ inputs.trade }}" = "true" ]; then
+          if [ "${{ github.event.schedule }}" = "15 21 * * 1-5" ] || [ "${{ inputs.trade }}" = "true" ] || [ -n "$ALPHAFORGE_APPROVE" ]; then
             python -m alphaforge.live
           else
             python -m alphaforge.live --quotes-only

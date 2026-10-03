@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 
-from . import backtest, metrics, signals
+from . import analytics, backtest, metrics, portfolio, signals
 from .backtest import Config
 from .data import MARKET_STRIP, risk_free
 from .refdata import CRYPTO, name, sector, yahoo
@@ -188,7 +188,7 @@ def risk_block(w, rets, bench_rets, nav, ann, lookback, shock, shock_label, sort
     order = sorted(syms, key=sort_key)
     return {"ex_ante_vol": sigma, "realized_vol": realized, "var95": 1.645 * math.sqrt(var_d) * nav,
             "hvar95": hvar, "beta": beta, "gross": float(w.abs().sum()), "net": float(w.sum()),
-            "stress": {"label": shock_label, "pnl": beta * shock * nav},
+            "stress": {"label": shock_label, "pnl": beta * shock * nav}, "betas": {s: float(v) for s, v in betas.items()},
             "contrib": {s: float(v) for s, v in contrib[contrib.abs() > 1e-4].sort_values(ascending=False).items()},
             "corr_syms": order, "corr": rets[order].iloc[-lookback:].corr().round(2).fillna(0).values.tolist()}
 
@@ -204,12 +204,14 @@ def growth_block(res, lines, ann):
     freq = "W-FRI" if ann == 252 else "W-SUN"
     curves = pd.DataFrame({k: (1 + v).cumprod() for k, v in series.items()}).resample(freq).last()
     dd = pd.DataFrame({k: metrics.drawdown(v) for k, v in series.items()}).resample(freq).min()
-    compare = [{"name": k, **{m: metrics.stats(v, rf, ann)[m] for m in ("CAGR", "Ann. Vol", "Sharpe", "Max Drawdown")}}
+    bench_key = next(iter(lines))
+    compare = [{"name": k, **{m: metrics.stats(v, rf, ann)[m] for m in ("CAGR", "Ann. Vol", "Sharpe", "Max Drawdown")},
+                **(analytics.active_stats(v, series[bench_key], ann) if k != bench_key else {})}
                for k, v in series.items()]
     mt = metrics.monthly_table(r)
     return {"summary": metrics.summary(res), "start": str(t0.date()), "dates": [str(i.date()) for i in curves.index],
             "lines": {k: curves[k].tolist() for k in curves}, "drawdown": {k: dd[k].tolist() for k in dd},
-            "compare": compare, "rf_avg": float(rf.mean() * ann) if rf is not None else None,
+            "compare": compare, "bench_name": bench_key, "rf_avg": float(rf.mean() * ann) if rf is not None else None,
             "monthly": {"years": [int(y) for y in mt.index], "cols": list(mt.columns), "values": mt.values.tolist()}}
 
 
@@ -227,6 +229,190 @@ def _status(lc, sc, m, nav, rule):
             "pending": (m.get("pending") or {}).get("signal_date"), "rule": rule, "nav": nav,
             "high_water": m.get("high_water"), "drawdown": (nav / m["high_water"] - 1) if m.get("high_water") else 0,
             "halt_at": -sc["max_drawdown_halt"]}
+
+
+# ---------------------------------------------------------------- desk: limits, preview, health, controls
+
+# Monitoring limits. "hard" ones are enforced by the trading job (capped or halted); "soft" ones only
+# light up here. Override any of them per sleeve with "limits" in live.json.
+LIMITS = {
+    "equity": {"max_sector": 0.40, "max_beta": 1.2, "var_pct": 0.025, "max_days_to_exit": 1.0, "vol_mult": 1.5,
+               "max_te": 0.12, "drift": 1.2},
+    "crypto": {"max_beta": 1.5, "var_pct": 0.08, "max_days_to_exit": 1.0, "vol_mult": 1.5, "drift": 1.2},
+}
+REPO = "https://github.com/z125081-Sam-Lam/alphaforge"
+
+
+def _adv_usd(raw, syms, ysym, crypto, n=20):
+    """20-day average dollar volume. Yahoo reports crypto volume in dollars already."""
+    out = {}
+    for s in syms:
+        y = ysym(s)
+        if y in raw["Volume"] and y in raw["Close"]:
+            v, c = raw["Volume"][y].iloc[-n:], raw["Close"][y].iloc[-n:]
+            x = float((v if crypto else v * c).mean())
+            if x > 0:
+                out[s] = x
+    return out
+
+
+def _expected_close(crypto, now):
+    """The latest daily bar the data should have: yesterday (UTC) for crypto; for stocks today once
+    the market has opened on a trading day, else the previous trading day."""
+    from .live import _CBD
+    if crypto:
+        return pd.Timestamp(now.date()) - pd.Timedelta(days=1)
+    ny = now.tz_convert("America/New_York")
+    d = pd.Timestamp(ny.date())
+    days = pd.date_range(d - pd.Timedelta(days=12), d, freq=_CBD)
+    if days[-1] == d and ny.hour * 60 + ny.minute >= 570:
+        return d
+    return days[-1] if days[-1] < d else days[-2]
+
+
+def _last_target(m, alpha, rets, prices, strat):
+    """Weights of the last rebalance (stored by the job; rebuilt from history for older state)."""
+    if m.get("target"):
+        return m["target"]
+    if not m.get("last_signal"):
+        return {}
+    i = prices.index.searchsorted(pd.Timestamp(m["last_signal"]), side="right") - 1
+    return {k: float(v) for k, v in backtest.targets_at(alpha, rets, i, strat).items() if v} if i > 0 else {}
+
+
+def exposure_rows(universe, book, target, bench, sector_fn):
+    """Held, target and benchmark weight per name: drift = held - target, active = held - benchmark."""
+    w = {r["sym"]: r["weight"] or 0.0 for r in book}
+    syms = list(dict.fromkeys(list(w) + [s for s in universe if target.get(s) or bench.get(s)]))
+    rows = []
+    for s in syms:
+        r = {"sym": s, "sector": sector_fn(s), "w": w.get(s, 0.0), "target": target.get(s, 0.0), "bench": bench.get(s, 0.0)}
+        rows.append({**r, "drift": r["w"] - r["target"], "active": r["w"] - r["bench"]})
+    rows.sort(key=lambda r: -abs(r["active"]))
+    return rows
+
+
+def preview_block(name, sc, strat, m, tgt, pos, nav, prices, alpha_row, cost_bps, sector_fn):
+    """What the next rebalance (and swap check) would trade if it ran on today's prices."""
+    from .live import _CBD, plan_orders, swap_orders
+    px = prices.iloc[-1].dropna()
+    w = {k: float(v) for k, v in tgt.items() if v and np.isfinite(v)}
+    out = {"next": analytics.next_dates(name, sc, strat, m, prices.index[-1], _CBD),
+           "rebalance": analytics.preview_orders(plan_orders(w, pos, nav, px, sc), px, pos, nav, sc, cost_bps, sector_fn),
+           "require_approval": bool(sc.get("require_approval")), "awaiting": m.get("awaiting"),
+           "max_order": sc["max_order_notional"], "min_trade": sc["min_trade_notional"],
+           "approve_url": f"{REPO}/actions/workflows/terminal.yml"}
+    if name == "equity" and strat.swap_every:
+        held = {s: float(px[s]) / q["avg_cost"] - 1 for s, q in pos.items()
+                if q["qty"] > 0 and s in px and (q.get("avg_cost") or 0) > 0}
+        drop, add = portfolio.pick_swaps(held, alpha_row, strat.swap_count)
+        out["swap"] = {"drop": drop, "add": add, "pnl": {s: held[s] for s in drop},
+                       **analytics.preview_orders(swap_orders(drop, add, pos, px, sc), px, pos, nav, sc, cost_bps, sector_fn)}
+    return out
+
+
+def limit_rows(kind, lc_limits, risk, model, liq, preview, st, strat, sc, nav, bench_label):
+    L = {**LIMITS[kind], **(lc_limits or {})}
+    w = [abs(v) for v in (risk.get("weights") or {}).values()]
+    sectors = risk.get("sectors") or {}
+    nxt = max([abs(o["notional"]) for o in preview["rebalance"]["orders"]] + [0])
+    return analytics.limits([
+        ("Gross exposure", risk["gross"], strat.max_leverage, "hard", "pct"),
+        (f"Largest position (traded at ≤{strat.max_weight:.0%})", max(w, default=0), strat.max_weight * L["drift"], "hard", "pct"),
+        ("Drawdown vs halt", st["drawdown"], st["halt_at"], "hard", "pct"),
+        ("Largest next order", nxt or None, sc["max_order_notional"], "hard", "usd"),
+        ("Forecast volatility", risk["ex_ante_vol"] if risk["gross"] else None,
+         (strat.target_vol or 0) * L["vol_mult"], "soft", "pct"),
+        (f"Beta to {bench_label}", risk["beta"] if risk["gross"] else None, L["max_beta"], "soft", "num"),
+        ("Largest sector", max(sectors.values(), default=None), L.get("max_sector"), "soft", "pct"),
+        ("1-day VaR 95% / NAV", risk["var95"] / nav if nav and risk["gross"] else None, L["var_pct"], "soft", "pct"),
+        ("Tracking error vs benchmark", (model or {}).get("active", {}).get("vol") if (model or {}).get("active") else None,
+         L.get("max_te"), "soft", "pct"),
+        ("Days to exit at 10% ADV", liq["max_days"], L["max_days_to_exit"], "soft", "num"),
+    ])
+
+
+def _jsonl(path, n=60):
+    if not os.path.exists(path):
+        return []
+    with open(path) as f:
+        lines = [x for x in f.readlines()[-n:] if x.strip()]
+    return [json.loads(x) for x in lines[::-1]]
+
+
+def controls_block(lc, name, sc, state_dir):
+    kill = f"{state_dir}/KILL" if name == "equity" else f"{state_dir}/KILL_{name.upper()}"
+    live = bool(lc["live_money"]) and lc["broker"] == "alpaca"
+    confirm = os.environ.get("ALPHAFORGE_CONFIRM_LIVE") == "yes"
+    return {
+        "controls": [
+            ["Broker", {"alpaca": "Alpaca " + ("LIVE MONEY" if live else "paper"), "sim": "Simulator"}.get(lc["broker"], lc["broker"]), "ok" if not live else "warn"],
+            ["Real-money gate", "open: live_money and ALPHAFORGE_CONFIRM_LIVE both set" if live and confirm
+             else "closed: needs live_money true AND ALPHAFORGE_CONFIRM_LIVE=yes", "warn" if live and confirm else "ok"],
+            ["Kill switch", f"ARMED ({os.path.basename(kill)} present)" if os.path.exists(kill) else f"clear (commit state/{os.path.basename(kill)} to halt)",
+             "fail" if os.path.exists(kill) else "ok"],
+            ["Approval before trading", "required" if sc.get("require_approval") else "not required (set require_approval in live.json)", "ok"],
+            ["Max order size", f"${sc['max_order_notional']:,.0f}", "ok"],
+            ["Drawdown halt", f"{sc['max_drawdown_halt']:.0%} below the sleeve's peak", "ok"],
+            ["Duplicate orders", "blocked: deterministic client order ids (af-...), retries return 'duplicate'", "ok"],
+            ["Stale data", f"refuses to trade on prices older than {sc['max_data_age_days']} days", "ok"],
+        ],
+        "permissions": [
+            ["View this terminal", "anyone with the link; read-only, holds no keys"],
+            ["Place orders", "the GitHub Actions job only, with the repository's Alpaca secrets"],
+            ["Approve a rebalance", "repository collaborators with write access: Actions > terminal > Run workflow > approve"],
+            ["Change strategy or limits", "a commit to live.json, so every change is in the git history"],
+            ["Trade real money", "live_money: true in live.json AND repository variable ALPHAFORGE_CONFIRM_LIVE=yes"],
+            ["Halt trading", "commit state/KILL (stocks) or state/KILL_CRYPTO, or set variable ALPHAFORGE_KILL"],
+            ["Stream live prices", "each viewer's own Alpaca key, kept in their browser"],
+        ],
+        "audit": _jsonl(f"{state_dir}/audit.jsonl"),
+        "alerts": _jsonl(f"{state_dir}/alerts.jsonl"),
+    }
+
+
+def desk_block(kind, *, lc, sc, strat, m, raw, prices, bench, bench_label, universe, ysym, model, w, bench_w,
+               res, book, risk, nav, st, tgt, alpha, rets, pos, positions_all, broker, blotter, quotes, px_all,
+               scenarios, sector_fn, now, state_dir, last_run):
+    """Everything the desk panels need for one sleeve."""
+    crypto = kind == "crypto"
+    ann = 365 if crypto else 252
+    adv = _adv_usd(raw, list(dict.fromkeys(universe + [r["sym"] for r in book])), ysym, crypto)
+    mdl = None
+    if model is not None:
+        mdl = {"total": analytics.decompose(w, model, ann), "active": analytics.decompose(w - bench_w, model, ann),
+               "factor_vol": {f: math.sqrt(max(model["F"][k, k], 0) * ann) for k, f in enumerate(model["factors"])},
+               "names": model["factors"], "n": len(model["syms"])}
+        attr = analytics.attribution(res, model, rets, "W-SUN" if crypto else "W-FRI")
+        attr["sectors"] = {k: float(v) for k, v in pd.Series(attr["names"]).groupby(sector_fn).sum().sort_values(ascending=False).items()} \
+            if attr["names"] and not crypto else {}
+    else:
+        attr = None
+    shocks = []
+    if mdl and mdl["total"]:
+        for f in model["styles"]:
+            x = mdl["total"]["exposure"].get(f, 0.0)
+            k = model["factors"].index(f)
+            move = -math.copysign(3 * math.sqrt(max(model["F"][k, k], 0) * 21), x or 1)
+            shocks.append({"label": f"{f.replace('_', ' ')} factor 3σ month against the book", "ret": x * move, "pnl": x * move * nav})
+    stress = {"history": analytics.stress(w[w != 0], prices, bench, nav, scenarios, risk.get("betas", {})), "factor": shocks}
+    liq = analytics.liquidity(book, adv)
+    risk["weights"] = {s: float(v) for s, v in w[w != 0].items()}
+    preview = preview_block(kind, sc, strat, m, tgt, pos, nav, prices, alpha.iloc[-1], strat.cost_bps + strat.slippage_bps, sector_fn)
+    lim = limit_rows(kind, sc.get("limits") if crypto else lc.get("limits"), risk, mdl, liq, preview, st, strat, sc, nav, bench_label)
+    tca = analytics.tca(blotter, raw, ysym, crypto, strat.cost_bps + strat.slippage_bps)
+    identity = None
+    if hasattr(broker, "account"):
+        a = broker.account()
+        identity = (a["equity"], a["cash"], sum(p.get("mv") or 0 for p in positions_all.values()))
+    fills_book = average_costs(broker.fills("2015-01-01T00:00:00Z")) if hasattr(broker, "fills") else {}
+    health = analytics.data_health(prices[universe], quotes, _expected_close(crypto, now), crypto, pos, fills_book, identity,
+                                   blotter, {"last_run": last_run}, now)
+    ctl = controls_block(lc, kind, sc, state_dir)
+    live_alerts = [f"limit breach: {r['name']}" for r in lim if r["light"] == "red"] + \
+                  [f"data: {h['check']} ({h['detail']})" for h in health if h["status"] == "fail"]
+    return {"model": mdl, "attribution": attr, "stress": stress, "liquidity": liq, "limits": lim, "preview": preview,
+            "tca": tca["summary"], "tca_rows": tca["rows"], "health": health, "controls": ctl, "alerts_now": live_alerts}
 
 
 # ---------------------------------------------------------------- pages
@@ -286,6 +472,33 @@ def equity_page(raw, prices, bench, lc, broker, state_dir, meta, nv, account, no
     risk["exposures"] = {f: float((w * sc.iloc[-1].fillna(0)).sum()) for f, sc in scores.items()}
     blotter, slip = blotter_rows(broker, "us_equity", "equity", state_dir)
 
+    # Factor risk model on the S&P 100 (strategy names + watchlist) with a year of daily returns.
+    from .live import sleeve_configs
+    msyms = [s for s in dict.fromkeys(universe + list(lc.get("watchlist", []))) if s in raw["Close"] and s != "SPY"]
+    mp = raw["Close"][msyms].ffill().iloc[-520:]
+    mp = mp.loc[:, mp.iloc[-253:].notna().all()]
+    model = analytics.risk_model(mp.pct_change(), signals.factor_scores(mp), {s: sector(s) for s in mp.columns})
+    bench_w = pd.Series(1 / len(universe), index=universe)
+    target = _last_target(m, alpha, rets, prices, strat)
+    sc_eq = sleeve_configs(lc)["equity"]
+    desk = desk_block("equity", lc=lc, sc=sc_eq, strat=strat, m=m, raw=raw, prices=prices, bench=bench, bench_label="S&P 500",
+                      universe=universe, ysym=lambda s: s, model=model, w=w, bench_w=bench_w, res=res, book=book, risk=risk,
+                      nav=nav, st=_status(lc, lc, m, nav, ""), tgt=tgt, alpha=alpha, rets=rets, pos=pos,
+                      positions_all=nv["positions"], broker=broker, blotter=blotter, quotes={s: quote(raw, s) for s in shown},
+                      px_all=prices.iloc[-1], scenarios=analytics.EQUITY_SCENARIOS, sector_fn=sector,
+                      now=pd.Timestamp.now(tz="UTC"), state_dir=state_dir, last_run=meta.get("last_run"))
+    desk["exposure"] = exposure_rows(universe, book, target, bench_w.to_dict(), sector)
+    desk["bench_label"] = f"equal weight {len(universe)}"
+    sig_panels = {**scores, "alpha": alpha}
+    month_rows = [r for r in prices.index.searchsorted(prices.resample("ME").last().index, side="right") - 1 if r > 252][-13:]
+    trade_days = res.turnover[res.turnover > 0].index[-24:]
+    adv = _adv_usd(raw, universe, lambda s: s, False)
+    desk["signals"] = {
+        "ic": analytics.signal_ic(sig_panels, prices), "horizons": [1, 5, 21, 63],
+        "corr": analytics.signal_corr(sig_panels, prices), "crowding": analytics.crowding(sig_panels, rets),
+        "capacity": analytics.capacity({**{k: analytics.standalone_weights(z, month_rows) for k, z in sig_panels.items()},
+                                        "strategy": res.weights.loc[trade_days]}, adv)}
+
     rule = "month-end rebalance" + (f", swap worst {strat.swap_count} every {strat.swap_every}d" if strat.swap_every else "")
     return {
         "page": "equity", "generated_at": now, "as_of": str(prices.index[-1].date()),
@@ -299,7 +512,7 @@ def equity_page(raw, prices, bench, lc, broker, state_dir, meta, nv, account, no
         "backtest": research, "signals": sig, "account": account,
         "sleeve_curve": {"dates": list(_curve(state_dir, "equity").index), "curve": _curve(state_dir, "equity").tolist()},
         "book": book, "totals": totals, "blotter": blotter, "slippage": {"avg_bps": slip[0], "n": slip[1]},
-        "risk": risk,
+        "risk": risk, "desk": desk,
     }
 
 
@@ -335,6 +548,25 @@ def crypto_page(craw, cprices, lc, broker, state_dir, meta, nv, account, now):
     unmanaged = [r["sym"] for r in book if r["sym"] not in universe]
 
     quotes = {s: q for s in universe if (q := quote(craw, yahoo(s), 365))}
+
+    # One-factor model (crypto market + coin-specific); benchmark is buying and holding bitcoin.
+    from .live import sleeve_configs
+    model = analytics.risk_model(rets[universe], None, None, window=365)
+    bench_w = pd.Series({s: float(s == btc.name) for s in universe})
+    sc = sleeve_configs({**lc, "crypto": {**cc, "enabled": True}})["crypto"]
+    desk = desk_block("crypto", lc=lc, sc=sc, strat=strat, m=m, raw=craw, prices=cprices, bench=btc, bench_label="Bitcoin",
+                      universe=universe, ysym=yahoo, model=model, w=w, bench_w=bench_w, res=res, book=book, risk=risk,
+                      nav=nav, st=_status(lc, cc, m, nav, ""), tgt=tgt, alpha=trend, rets=rets, pos=pos,
+                      positions_all=nv["positions"], broker=broker, blotter=blotter, quotes=quotes,
+                      px_all=cprices.iloc[-1], scenarios=analytics.CRYPTO_SCENARIOS, sector_fn=lambda s: "Crypto",
+                      now=pd.Timestamp.now(tz="UTC"), state_dir=state_dir, last_run=meta.get("last_run"))
+    desk["exposure"] = exposure_rows(universe, book, _last_target(m, trend, rets, cprices, strat), bench_w.to_dict(),
+                                     lambda s: "Crypto")
+    desk["bench_label"] = "bitcoin buy & hold"
+    trade_days = res.turnover[res.turnover > 0].index[-24:]
+    desk["signals"] = {
+        "ic": analytics.signal_ic({"trend": trend}, cprices, horizons=(1, 7, 30, 90), pooled=True), "horizons": [1, 7, 30, 90],
+        "capacity": analytics.capacity({"strategy": res.weights.loc[trade_days]}, _adv_usd(craw, universe, yahoo, True))}
     return {
         "page": "crypto", "generated_at": now, "as_of": str(cprices.index[-1].date()),
         "status": {**_status(lc, cc, m, nav, f"weekly trend rebalance, {cc['rebalance_days']}d"),
@@ -349,5 +581,5 @@ def crypto_page(craw, cprices, lc, broker, state_dir, meta, nv, account, now):
         "backtest": research, "signals": sig, "account": account,
         "sleeve_curve": {"dates": list(_curve(state_dir, "crypto").index), "curve": _curve(state_dir, "crypto").tolist()},
         "book": book, "totals": totals, "blotter": blotter, "slippage": {"avg_bps": slip[0], "n": slip[1]},
-        "risk": risk,
+        "risk": risk, "desk": desk,
     }

@@ -462,6 +462,74 @@ then the same pipeline as equities: cap at 35% per coin (§7), scale to a 25% an
 
 **Evidence** ([RESEARCH.md §6](RESEARCH.md#6-crypto-trend-sleeve)). From 2019, the trend sleeve had a Sharpe ratio of about 1.0 against 0.9 for holding Bitcoin, within one standard error ($\approx 0.45$), and a maximum drawdown near $-48\%$ against $-77\%$. Its case is drawdown control, not a higher Sharpe ratio. The 8 coins are today's survivors, so the backtest is biased upward like the equity one.
 
+## 17. Desk analytics
+
+Code: [`alphaforge/analytics.py`](../alphaforge/analytics.py). These numbers describe the book; none of them feed back into the trading decisions.
+
+### 17.1 Factor risk model
+
+A cross-sectional model in the style of Barra, fitted on the S&P 100 (the strategy's 30 names plus the watchlist), one regression per day over the last 252 days:
+
+$$r_{i,t} = f^{\text{mkt}}_t + \sum_{s} D_{i,s}\, f^{s}_t + \sum_{k} z_{i,k,t-1}\, f^{k}_t + \varepsilon_{i,t}, \qquad \text{subject to } \sum_s f^s_t = 0$$
+
+$D_{i,s}\in\{0,1\}$ is the sector dummy and $z_{i,k,t-1}$ the style z-score (momentum, reversal, low volatility, trend quality, §3–4) known at the prior close. The intercept and the sector dummies are collinear; the sum-to-zero constraint (added as a heavily weighted extra row of the least-squares system) makes $f^{\text{mkt}}_t$ the return of the average stock and $f^s_t$ each sector's return relative to it.
+
+The factor covariance $F$ and the specific variances $\delta_i^2$ are exponentially weighted with a 90-day half-life, $w_t \propto 2^{-(T-t)/90}$:
+
+$$F = \sum_t w_t (f_t-\bar f)(f_t-\bar f)^\top, \qquad \delta_i^2 = \sum_t w_t\, \varepsilon_{i,t}^2$$
+
+For weights $w$, the exposures are $x = X^\top w$ (with $X$ today's exposure matrix) and the forecast variance is
+
+$$\sigma^2 = x^\top F x + \sum_i w_i^2 \delta_i^2 .$$
+
+**Decomposition (Euler).** Factor $k$'s share of variance is $x_k (Fx)_k / \sigma^2$; the shares of all factors plus the specific share $\sum_i w_i^2\delta_i^2/\sigma^2$ add up to one. Grouping factors gives Market / Sector / Style / Specific. Name $i$'s share is $w_i(\Sigma w)_i/\sigma^2$ with $\Sigma = XFX^\top + \operatorname{diag}(\delta^2)$; these also add up to one.
+
+**Active risk.** The same decomposition applied to $w - b$, where $b$ is the benchmark (equal weight of the 30 names for stocks, 100% bitcoin for crypto), gives the forecast tracking error $\sqrt{(w-b)^\top\Sigma(w-b)\cdot 252}$ and its sources.
+
+The crypto sleeve uses the one-factor version (intercept only): the crypto market and coin-specific risk.
+
+### 17.2 P&L attribution
+
+With the backtest's end-of-day weights $w_{t-1}$, the day's book return on stocks is exactly
+
+$$\sum_i w_{i,t-1} r_{i,t} = \underbrace{\sum_k (X_t^\top w_{t-1})_k f^k_t}_{\text{market + sector + style}} + \underbrace{\sum_i w_{i,t-1}\varepsilon_{i,t}}_{\text{specific}}$$
+
+because the residuals are defined by the same regression. Adding cash $(1-\sum_i w_{i,t-1})\,r^f_t$ and subtracting costs gives the strategy's net return, so the parts add up to the total with no residual (a test checks this). Contributions are summed arithmetically over the window (not compounded), and per name as $\sum_t w_{i,t-1} r_{i,t}$.
+
+**Against a benchmark.** With active return $a_t = r_t - r^b_t$: tracking error $\mathrm{TE} = \operatorname{sd}(a)\sqrt{A}$, annual active return $\bar a A$, information ratio $\mathrm{IR} = \bar a A / \mathrm{TE}$ ($A$ = 252 or 365).
+
+### 17.3 Stress, liquidity, limits
+
+**Historical replay.** For a window $[t_0, t_1]$ (COVID crash, Q4 2018, 2022 rates, Aug 2024, Apr 2025; for crypto, the 2021 crash, Terra/LUNA, FTX and others), the book's move is $\sum_i w_i (P_{i,t_1}/P_{i,t_0} - 1)$ on today's weights. A name with no price at $t_0$ is proxied by $\beta_i \times$ the benchmark's move.
+
+**Factor shocks.** Style factor $k$ moved 3 standard deviations over a month against the book: P&L $= -\operatorname{sign}(x_k)\, 3\sqrt{21 F_{kk}}\; x_k \cdot \text{NAV}$.
+
+**Days to exit.** Position $i$ needs $|MV_i| / (0.10 \cdot \mathrm{ADV}_i)$ days when trading at most 10% of its 20-day average dollar volume.
+
+**Limits.** Utilization $u = |\text{value}|/\text{limit}$: green below 0.9, amber from 0.9 to 1, red at 1 or more. Hard limits are enforced by the trading job (order size, position cap at trade time, gross exposure, drawdown halt); soft limits (forecast volatility, beta, largest sector, VaR, tracking error, days to exit) are monitored and raise an alert on the terminal.
+
+### 17.4 Transaction cost analysis
+
+Implementation shortfall (Perold 1988) against the decision price $P_d$ (the signal close), split at the arrival price $P_a$ (the open of the fill day) for stocks, with side $s=\pm1$:
+
+$$\underbrace{s\left(\tfrac{P_f}{P_d}-1\right)}_{\text{total}} \approx \underbrace{s\left(\tfrac{P_a}{P_d}-1\right)}_{\text{delay}} + \underbrace{s\left(\tfrac{P_f}{P_a}-1\right)}_{\text{impact}}$$
+
+in basis points, positive = cost. Participation is shares filled divided by the day's volume. Fill rate is filled over ordered quantity across finished orders. Averages are notional-weighted.
+
+### 17.5 Signal diagnostics
+
+**IC and decay.** At each month-end $m$, the rank IC is the Spearman correlation between the score $z_{\cdot,m}$ and the forward return $P_{\cdot,m+h}/P_{\cdot,m}-1$ across names, for $h \in \{1, 5, 21, 63\}$ days. The table reports the mean IC, $t = \overline{IC}/\operatorname{sd}(IC)\cdot\sqrt{n}$ and the hit rate. Reading across horizons shows the decay. The crypto trend signal has only 8 coins, so its IC is pooled across coins and month-ends, with the sample size shrunk to $n\cdot\min(1, \Delta/h)$ when the horizon $h$ is longer than the sampling step $\Delta$ (overlapping windows are not independent).
+
+**Signal correlation.** The average rank correlation between signals at month-ends over 3 years.
+
+**Crowding.** Co-movement of the top third of names by each signal (Lou & Polk's comomentum): the average pairwise correlation of their market-adjusted daily returns over 63 days, shown now and as a percentile of its last 3 years. A high percentile means the names trade as one block, as they do when many funds hold them.
+
+**Capacity.** With $\overline{|\Delta w_i|}$ the average trade in name $i$ per rebalance, the AUM at which no name needs more than 10% of its ADV in a day is $\min_i 0.10\,\mathrm{ADV}_i / \overline{|\Delta w_i|}$.
+
+### 17.6 Approval, audit, permissions
+
+With `"require_approval": true` in `live.json` (or under `"crypto"`), a due rebalance or swap is not traded: the sleeve records `awaiting`, raises one alert and checks again every run, so a month-end rebalance is not lost. A run with `ALPHAFORGE_APPROVE=equity|crypto|all` (the workflow's *approve* input) executes it. Every trading run appends to `state/audit.jsonl` (time, GitHub actor, trigger, run id, commit, events, order count, alerts) and alerts to `state/alerts.jsonl`, both committed with the state.
+
 ## References
 
 - Ang, A., Hodrick, R., Xing, Y. & Zhang, X. (2006). The cross-section of volatility and expected returns. *Journal of Finance* 61(1).
@@ -475,6 +543,10 @@ then the same pipeline as equities: cap at 35% per coin (§7), scale to a 25% an
 - Jegadeesh, N. & Titman, S. (1993). Returns to buying winners and selling losers. *Journal of Finance* 48(1).
 - Ledoit, O. & Wolf, M. (2004). Honey, I shrunk the sample covariance matrix. *Journal of Portfolio Management* 30(4).
 - Lehmann, B. (1990). Fads, martingales, and market efficiency. *Quarterly Journal of Economics* 105(1).
+- Grinold, R. & Kahn, R. (2000). *Active Portfolio Management*, 2nd ed. McGraw-Hill.
 - Lo, A. (2002). The statistics of Sharpe ratios. *Financial Analysts Journal* 58(4).
+- Lou, D. & Polk, C. (2022). Comomentum: inferring arbitrage activity from return correlations. *Review of Financial Studies* 35(7).
+- Menchero, J., Orr, D. & Wang, J. (2011). The Barra US equity model (USE4): methodology notes. MSCI.
+- Perold, A. (1988). The implementation shortfall: paper versus reality. *Journal of Portfolio Management* 14(3).
 - Liu, Y. & Tsyvinski, A. (2021). Risks and returns of cryptocurrency. *Review of Financial Studies* 34(6).
 - Moreira, A. & Muir, T. (2017). Volatility-managed portfolios. *Journal of Finance* 72(4).

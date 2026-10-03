@@ -66,7 +66,7 @@ a { color: var(--amber); }
 
 main { flex: 1; display: grid; gap: 1px; background: var(--rule);
   grid-template-columns: minmax(260px, 3fr) minmax(0, 6fr) minmax(320px, 4fr);
-  grid-template-areas: "mon gp book" "mon perf bltr" "sig risk mth"; }
+  grid-template-areas: "mon gp book" "mon perf bltr" "sig risk mth" "pre aud dh"; }
 .p { background: var(--panel); display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .p > h2 { margin: 0; display: flex; justify-content: space-between; gap: 8px; align-items: baseline; flex-wrap: wrap;
   font: 600 13px var(--f); color: var(--amber); background: var(--bar); padding: 4px 8px; border-bottom: 1px solid var(--rule); }
@@ -77,13 +77,19 @@ main { flex: 1; display: grid; gap: 1px; background: var(--rule);
 .body { overflow: auto; flex: 1; min-height: 0; }
 #mon { grid-area: mon; max-height: 860px; } #gp { grid-area: gp; } #perf { grid-area: perf; }
 #book { grid-area: book; max-height: 470px; } #bltr { grid-area: bltr; max-height: 420px; }
-#sig { grid-area: sig; max-height: 520px; } #risk { grid-area: risk; max-height: 760px; } #mth { grid-area: mth; max-height: 520px; }
+#sig { grid-area: sig; max-height: 620px; } #risk { grid-area: risk; max-height: 760px; } #mth { grid-area: mth; max-height: 520px; }
+#pre { grid-area: pre; max-height: 640px; } #aud { grid-area: aud; max-height: 640px; } #dh { grid-area: dh; max-height: 640px; }
 
 table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 th { position: sticky; top: 0; background: var(--panel); color: var(--dim); font-weight: 400; text-align: right;
   padding: 3px 6px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
 td { padding: 2px 6px; text-align: right; white-space: nowrap; border-bottom: 1px solid #120e0a; }
-th:first-child, td:first-child { text-align: left; }
+th:first-child, td:first-child, td.l { text-align: left; }
+td.wrap { text-align: left; white-space: normal; min-width: 160px; }
+.light { display: inline-block; width: 8px; height: 8px; border-radius: 50%; vertical-align: middle; }
+.appr { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; padding: 6px 8px; border-bottom: 1px solid var(--rule); }
+.appr a.go { text-decoration: none; }
+.tabs b { color: inherit; font-weight: 600; }
 tfoot td { position: sticky; bottom: 0; background: var(--bar); border-top: 1px solid var(--rule); font-weight: 500; }
 td.s { color: var(--amber); font-weight: 500; }
 td .dot { color: var(--up); margin-left: 4px; font-size: 10px; }
@@ -146,17 +152,17 @@ dialog .row button:not(.go) { border: 1px solid var(--rule); padding: 5px 10px; 
   .lv { transition: none; }
 }
 @media (max-width: 1150px) {
-  main { grid-template-columns: 1fr 1fr; grid-template-areas: "gp gp" "perf perf" "book book" "mon bltr" "sig risk" "mth mth"; }
+  main { grid-template-columns: 1fr 1fr; grid-template-areas: "gp gp" "perf perf" "book book" "mon bltr" "sig risk" "pre mth" "dh aud"; }
   .strip { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .top { grid-template-columns: auto 1fr; }
   .clock { grid-column: 1 / -1; flex-wrap: wrap; white-space: normal; }
 }
 @media (max-width: 700px) {
-  main { grid-template-columns: 1fr; grid-template-areas: "gp" "perf" "book" "mon" "bltr" "sig" "risk" "mth"; }
+  main { grid-template-columns: 1fr; grid-template-areas: "gp" "perf" "book" "mon" "bltr" "sig" "risk" "pre" "dh" "aud" "mth"; }
   .strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .top { grid-template-columns: 1fr; }
   .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .chart { height: 260px; }
-  #mon, #book, #bltr, #sig, #mth { max-height: 420px; }
+  #mon, #book, #bltr, #sig, #mth, #pre, #dh, #aud { max-height: 480px; }
   .sugg li { grid-template-columns: 40px auto 1fr; } .sugg .q { display: none; }
 }

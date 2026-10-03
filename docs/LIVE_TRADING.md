@@ -83,6 +83,12 @@ GitHub may delay scheduled runs by several minutes at busy times, and pauses sch
 
 `strategy` accepts any `backtest.Config` field, so whatever you test in the dashboard can be run live unchanged. Keep `long_only` unless your broker account allows short selling.
 
+**Approval.** Add `"require_approval": true` (top level for stocks, inside `"crypto"` for coins) and a due rebalance or swap waits instead of trading. The terminal's *Next trade* panel shows the orders it would place; to release them, open GitHub → Actions → terminal → **Run workflow** and choose *approve: equity* (or *crypto*, *all*). The sleeve keeps waiting, with one alert, until you do, so a month-end rebalance is never skipped.
+
+**Limits.** `"limits"` overrides the monitoring limits on the terminal, for example `{"max_sector": 0.5, "max_beta": 1.3, "var_pct": 0.03, "max_te": 0.15}` (crypto: inside `"crypto"`). Defaults are in `terminal.LIMITS`. These only light up the terminal; the hard limits above (`max_order_notional`, `max_weight`, `max_leverage`, `max_drawdown_halt`) are what the job enforces.
+
+**Audit trail.** Every trading run appends a line to `state/audit.jsonl` (time, GitHub user, trigger, run, commit, what it did, alerts) and alerts to `state/alerts.jsonl`. Both are committed, so the history can't be quietly edited.
+
 ## Connect Alpaca (paper)
 
 1. Create a paper account at alpaca.markets and generate an API key.

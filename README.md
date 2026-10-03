@@ -18,12 +18,22 @@ python -m alphaforge.research     # factor ICs, benchmarks, walk-forward, deflat
 
 Two static, keyboard-driven pages on GitHub Pages, one per sleeve, sharing `site/terminal.js` and `site/terminal.css`: **Equities** (`index.html`, reads `data.json`) and **Crypto** (`crypto.html`, reads `crypto.json`). Tabs at the top switch between them; both can be open at once.
 
-- Command line with suggestions: type a ticker, part of a company or coin name ("apple", "ether"), or a function. Arrow keys and Enter pick, Tab completes. `PORT`, `SIG`, `RISK`, `BT`, `BLTR`, `MTH`, `EQUITY`, `CRYPTO` and `HELP` work as commands, and F1–F8 jump to panels.
+- Command line with suggestions: type a ticker, part of a company or coin name ("apple", "ether"), or a function. Arrow keys and Enter pick, Tab completes. `PORT`, `SIG`, `RISK`, `BT`, `BLTR`, `MTH`, `ATTR`, `FACT`, `STRESS`, `LIQ`, `LIM`, `EXP`, `TCA`, `IC`, `PREV`, `DATA`, `AUD`, `EQUITY`, `CRYPTO` and `HELP` work as commands, and F1–F9 jump to panels.
 - **Book with live P&L, the way Alpaca shows it:** quantity, average cost, value, today's P&L and unrealized P&L per position, with totals, for that sleeve only. With live prices on, every number updates tick by tick.
 - Market strip (SPX, NDX, RTY, VIX, 10Y, DXY, gold, WTI, BTC, EURUSD), and a monitor of the S&P 100 plus the strategy's names, with All / Strategy / Live tabs, sparklines and candlestick charts. The strategy trades only its 30 names; the rest are watch-only (`"watchlist"` in `live.json`).
 - Order blotter (times in New York, slippage of each fill against the signal price), signals, and a monthly returns grid.
 - Risk for the sleeve: forecast vs realized volatility, parametric and historical VaR, beta, a stress test, sector exposure, each name's share of risk, distance to the drawdown halt, a labelled correlation map, and one line for the whole account.
-- Backtest panel: growth and underwater charts against SPY (or Bitcoin), an equal-weight portfolio of the same names, and momentum alone, plus a comparison table.
+- Backtest panel: growth and underwater charts against SPY (or Bitcoin), an equal-weight portfolio of the same names, and momentum alone, plus a comparison table with tracking error and information ratio.
+- **Desk analytics** ([MATH.md §17](docs/MATH.md#17-desk-analytics)):
+  - *Attribution:* the strategy's return split into market, sector, style factors, stock-specific, cash and costs by a factor risk model; also by sector and by stock. The parts add up exactly.
+  - *Factor risk model:* an S&P 100 cross-sectional model (market + sectors + 4 styles); total and active risk split into market, sector, style and specific, and each position's share.
+  - *Stress:* today's book replayed through the COVID crash, Q4 2018, 2022, Aug 2024 and Apr 2025 (crypto: 2021, LUNA, FTX...), plus factor shocks. *Liquidity:* days to exit at 10% of volume. *Limits:* every risk limit with its utilization and a traffic light.
+  - *Book exposure:* held vs last target (drift) vs benchmark (active), by name and by sector, plus pending orders.
+  - *TCA:* each fill's decision price, arrival price and fill price; slippage split into delay and impact; participation in volume; fill rate.
+  - *Signals:* rank IC at 1, 5, 21 and 63 days (decay), signal correlation, crowding (comomentum) and capacity.
+  - *Next trade:* what the next rebalance and swap would buy and sell on today's prices, with cost, turnover and limit checks, and an optional approval step.
+  - *Data health:* price freshness, gaps, stale prices, suspicious jumps (corporate actions, bad ticks), reconciliation of positions to fills, cash + positions = equity, stuck orders, live feed age.
+  - *Alerts & audit:* current limit breaches and failing checks, alerts from trading runs, an audit trail of every trading run (who, how, which commit, what it did), and the controls and permissions in force.
 
 **Data.** A GitHub Actions job (`.github/workflows/terminal.yml`) refreshes delayed Yahoo data every 30 minutes during market hours. After each close it trades the paper account, commits `state/` and redeploys the page.
 

@@ -25,11 +25,23 @@ const et = (iso) => {
 };
 
 let D = null, sym = null, range = 130, ptab = "growth", mtab = "all", gpChart, pChart, gpSeries, gpBars = [];
+let rtab = "sum", btab = "pos", otab = "ord", stab = "scores", atab = "alerts";
+const REPO = "https://github.com/z125081-Sam-Lam/alphaforge";
 const FUNCS = {
   MON: ["mon", "Monitor: every ticker with price and change"], GP: ["gp", "Price chart of the selected ticker"],
   PORT: ["book", "Paper book: positions and live P&L"], BLTR: ["bltr", "Order blotter: orders, fills, slippage"],
-  SIG: ["sig", "Signals: model scores and targets"], RISK: ["risk", "Risk: volatility, VaR, stress, correlation"],
+  SIG: ["sig", "Signals: model scores and targets"], RISK: ["risk", "Risk: volatility, VaR, correlation"],
   BT: ["perf", "Backtest and benchmarks"], MTH: ["mth", "Monthly returns"],
+  ATTR: ["perf", "P&L attribution: market, sector, style, stock, costs", () => { ptab = "attr"; renderPerf(); }],
+  FACT: ["risk", "Factor risk model: market, sector, style vs specific risk", () => { rtab = "model"; renderRisk(); }],
+  STRESS: ["risk", "Stress tests: historical crashes and factor shocks", () => { rtab = "stress"; renderRisk(); }],
+  LIQ: ["risk", "Liquidity: days to exit each position", () => { rtab = "liq"; renderRisk(); }],
+  LIM: ["risk", "Risk limits with traffic lights", () => { rtab = "lim"; renderRisk(); }],
+  EXP: ["book", "Active weights, drift from target, sector exposure", () => { btab = "exp"; renderBook(); }],
+  TCA: ["bltr", "Transaction cost analysis: decision vs fill, participation", () => { otab = "tca"; renderBltr(); }],
+  IC: ["sig", "Signal diagnostics: IC and decay", () => { stab = "ic"; renderSig(); }],
+  PREV: ["pre", "Next-trade preview and approval"], DATA: ["dh", "Data health checks"],
+  AUD: ["aud", "Alerts, audit trail, controls and permissions"],
 };
 const EXTRA = {
   HELP: "List of commands", LIVE: "Connect real-time prices", "LIVE OFF": "Disconnect real-time prices",
@@ -37,8 +49,32 @@ const EXTRA = {
   EQUITY: "Open the equities page", CRYPTO: "Open the crypto page",
 };
 const PAGES = { EQUITY: "index.html", EQ: "index.html", STOCKS: "index.html", CRYPTO: "crypto.html", CRY: "crypto.html" };
-const FKEYS = [["F1", "HELP"], ["F2", "MON"], ["F3", "GP"], ["F4", "PORT"], ["F5", "BLTR"], ["F6", "SIG"], ["F7", "RISK"], ["F8", "BT"]];
+const FKEYS = [["F1", "HELP"], ["F2", "MON"], ["F3", "GP"], ["F4", "PORT"], ["F5", "BLTR"], ["F6", "SIG"], ["F7", "RISK"], ["F8", "BT"], ["F9", "PREV"]];
 const SERIES = ["--amber", "--blue", "--aqua", "--violet"];
+const GROUPS = { Market: "--blue", Sector: "--violet", Style: "--amber", Specific: "--aqua", Cash: "--dim", Costs: "--down" };
+const OPEN_ST = ["new", "accepted", "pending_new", "partially_filled", "held", "submitted"];
+const LIGHT = { green: "--up", amber: "--cmd", red: "--down", ok: "--up", warn: "--cmd", fail: "--down" };
+const dot = (k, t) => `<i class="light" style="background:${css(LIGHT[k] || "--dim")}" title="${esc(t || k)}" role="img" aria-label="${esc(t || k)}"></i>`;
+const bps = (v, d = 1) => v == null ? "–" : (v > 0 ? "+" : "") + v.toFixed(d) + "bp";
+const lab = (s) => s.replace(/_/g, " ");
+const days = (d) => d == null ? "–" : d < 0.01 ? "<0.01" : fmt(d, 2);
+const fmtv = (v, f) => f === "usd" ? money(v) : f === "pct" ? pct(v, 1, false) : fmt(v);
+const later = `<p class="empty">Appears after the next data refresh.</p>`;
+const table = (head, rows) => `<table><thead><tr>${head.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.join("")}</tbody></table>`;
+const ubar = (u, k) => `<div class="bar"><i style="left:0;width:${Math.min(100, Math.max(0, u) * 100)}%;background:${css(LIGHT[k] || "--amber")}"></i></div>`;
+const kpiRow = (items, n = 4) => `<div class="kpis" style="grid-template-columns:repeat(${n},minmax(0,1fr))">${
+  items.map(([a, b]) => `<div class="kpi"><div>${a}</div><div>${b}</div></div>`).join("")}</div>`;
+
+function setTabs(id, items, cur, pick) {
+  $(id).innerHTML = items.map(([k, l]) => `<button aria-pressed="${k === cur}" data-k="${k}">${l}</button>`).join("");
+  $(id).querySelectorAll("button").forEach((b) => b.onclick = () => pick(b.dataset.k));
+}
+
+function nyseOpen() {
+  const ny = new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
+  const m = ny.getHours() * 60 + ny.getMinutes(), wd = ny.getDay();
+  return wd > 0 && wd < 6 && m >= 570 && m < 960;
+}
 
 function chartOpts(el) {
   return { autoSize: true,  // follows its panel's size (ResizeObserver), so late layout or window changes can't squash it
@@ -129,7 +165,7 @@ function lineSeries(chart, color, title) {
 
 function renderPerf() {
   const B = D.backtest, s = B.summary;
-  $("ptabs").innerHTML = [["growth", "Growth"], ["dd", "Drawdown"], ["sleeve", "Paper sleeve"], ["compare", "Compare"]].map(([k, l]) =>
+  $("ptabs").innerHTML = [["growth", "Growth"], ["dd", "Drawdown"], ["attr", "Attribution"], ["sleeve", "Paper sleeve"], ["compare", "Compare"]].map(([k, l]) =>
     `<button aria-pressed="${k === ptab}" data-k="${k}">${l}</button>`).join("");
   $("ptabs").querySelectorAll("button").forEach((b) => b.onclick = () => { ptab = b.dataset.k; renderPerf(); });
   const el = $("pc"), names = Object.keys(B.lines);
@@ -152,15 +188,19 @@ function renderPerf() {
     pChart.timeScale().fitContent();
     return;
   }
+  if (ptab === "attr") return renderAttr(el, kp);
   kp([["CAGR", pct(s.CAGR, 1)], ["Sharpe", `${fmt(s.Sharpe)} <span class="mut">±${fmt(s["Sharpe SE"])}</span>`],
     ["Max DD", pct(s["Max Drawdown"], 1)], ["Vol", pct(s["Ann. Vol"], 1, false)], [`Beta (${bench.split(" ")[0]})`, fmt(s.Beta)],
     ["Alpha", pct(s["Alpha (ann.)"], 1)]]);
   $("plegend").innerHTML = names.map((n, i) => `<span><i style="background:${css(SERIES[i % 4])}"></i>${esc(n)}</span>`).join("") +
     `<span>since ${B.start}, weekly${ptab === "growth" ? ", log scale" : ""}</span>`;
   if (ptab === "compare") {
-    $("pcompare").innerHTML = `<table><thead><tr><th>Series</th><th>CAGR</th><th>Vol</th><th>Sharpe</th><th>Max DD</th></tr></thead><tbody>${
+    const bn = (B.bench_name || "benchmark").split(" ")[0];
+    $("pcompare").innerHTML = `<table><thead><tr><th>Series</th><th>CAGR</th><th>Vol</th><th>Sharpe</th><th>Max DD</th><th>Active vs ${esc(bn)}</th><th>TE</th><th>IR</th></tr></thead><tbody>${
       B.compare.map((r) => `<tr><td class="s">${esc(r.name)}</td><td class="${cls(r.CAGR)}">${pct(r.CAGR, 1)}</td><td>${pct(r["Ann. Vol"], 1, false)}</td>
-      <td>${fmt(r.Sharpe)}</td><td class="dn">${pct(r["Max Drawdown"], 1)}</td></tr>`).join("")}</tbody></table>`;
+      <td>${fmt(r.Sharpe)}</td><td class="dn">${pct(r["Max Drawdown"], 1)}</td><td class="${cls(r.active)}">${pct(r.active, 1)}</td>
+      <td>${pct(r.te, 1, false)}</td><td class="${cls(r.ir)}">${fmt(r.ir)}</td></tr>`).join("")}</tbody></table>
+      <p class="note">Active = annual return above ${esc(bn)}; TE (tracking error) = volatility of that difference; IR (information ratio) = active ÷ TE.</p>`;
     return;
   }
   pChart = LightweightCharts.createChart(el, chartOpts(el));
@@ -182,7 +222,69 @@ function renderPerf() {
   pChart.timeScale().fitContent();
 }
 
+function renderAttr(el, kp) {
+  const A = D.desk && D.desk.attribution;
+  if (!A) { el.style.display = "none"; kp([]); $("plegend").innerHTML = ""; $("pcompare").innerHTML = later; return; }
+  const G = Object.keys(GROUPS).filter((g) => !CRYPTO || !["Sector", "Style"].includes(g));
+  kp([["Total", `<span class="${cls(A.total)}">${pct(A.total, 1)}</span>`], ...G.filter((g) => g !== "Cash").map((g) =>
+    [g, `<span class="${cls(A.parts[g])}">${pct(A.parts[g], 1)}</span>`])]);
+  $("plegend").innerHTML = G.map((g) => `<span><i style="background:${css(GROUPS[g])}"></i>${g}</span>`).join("") +
+    `<span>backtest ${A.start} → ${A.end}, cumulative</span>`;
+  pChart = LightweightCharts.createChart(el, chartOpts(el));
+  G.forEach((g) => {
+    const s = lineSeries(pChart, css(GROUPS[g]), g);
+    s.applyOptions({ priceFormat: { type: "custom", formatter: (v) => v.toFixed(1) + "%" } });
+    s.setData(A.dates.map((d, i) => ({ time: d, value: A.lines[g][i] * 100 })));
+  });
+  pChart.timeScale().fitContent();
+  const mx = (o) => Math.max(0.005, ...Object.values(o).map(Math.abs));
+  const names = Object.entries(A.names), top = Object.fromEntries([...names.slice(0, 5), ...names.slice(-5)]);
+  $("pcompare").innerHTML = `${CRYPTO ? "" : `<div class="sub">By style factor</div>${hbars(A.styles, mx(A.styles), (v) => pct(v, 2))}
+    <div class="sub">By sector</div>${hbars(A.sectors, mx(A.sectors), (v) => pct(v, 2))}`}
+    <div class="sub">Best and worst ${CRYPTO ? "coins" : "stocks"}</div>${hbars(top, mx(top), (v) => pct(v, 2))}
+    <p class="note">The strategy's return split by the ${CRYPTO ? "one-factor crypto" : "S&P 100 factor"} risk model: Market = the average ${CRYPTO ? "coin" : "stock"}${
+      CRYPTO ? "" : ", Sector = sector moves against the market, Style = momentum, reversal, low-vol and trend tilts"}, Specific = ${CRYPTO ? "coin" : "stock"} picking left after the factors, Cash = T-bill interest, Costs = trading costs. The parts add up exactly to the total.</p>`;
+}
+
 function renderBook() {
+  const pend = D.blotter.filter((o) => OPEN_ST.includes(o.status));
+  setTabs("btabs", [["pos", "Positions"], ["exp", "Exposure"], ["pend", `Pending${pend.length ? " " + pend.length : ""}`]], btab,
+    (k) => { btab = k; renderBook(); });
+  bookPositions();
+  if (btab === "exp") $("bookb").innerHTML = bookExposure();
+  if (btab === "pend") $("bookb").innerHTML = bookPending(pend);
+  bindRows($("bookb"));
+}
+
+function bookExposure() {
+  const K = D.desk;
+  if (!K) return later;
+  const sec = {};
+  K.exposure.forEach((r) => { const s = sec[r.sector] ||= { w: 0, target: 0, bench: 0 }; s.w += r.w; s.target += r.target; s.bench += r.bench; });
+  const nameRows = K.exposure.map((r) => `<tr class="click" data-s="${esc(r.sym)}" title="${esc(nm(r.sym))}"><td class="s">${esc(r.sym)}</td>
+    <td>${pct(r.w, 1, false)}</td><td class="mut">${pct(r.target, 1, false)}</td><td class="${cls(r.drift)}">${pct(r.drift, 2)}</td>
+    <td class="mut">${pct(r.bench, 1, false)}</td><td class="${cls(r.active)}">${pct(r.active, 1)}</td></tr>`);
+  return `${CRYPTO ? "" : `<div class="sub">Sectors vs benchmark</div>${table(["Sector", "Held", "Target", "Bench", "Active"],
+    Object.entries(sec).sort((a, b) => (b[1].w - b[1].bench) - (a[1].w - a[1].bench)).map(([k, s]) => `<tr><td>${esc(k)}</td>
+      <td>${pct(s.w, 1, false)}</td><td class="mut">${pct(s.target, 1, false)}</td><td class="mut">${pct(s.bench, 1, false)}</td>
+      <td class="${cls(s.w - s.bench)}">${pct(s.w - s.bench, 1)}</td></tr>`))}`}
+    <div class="sub">Names: held vs target vs benchmark</div>
+    ${table([CRYPTO ? "Coin" : "Ticker", "Held", "Target", "Drift", "Bench", "Active"], nameRows)}
+    <p class="note">Benchmark: ${esc(K.bench_label)}. Drift = held − the last rebalance's target (prices moved since). Active = held − benchmark.${
+      CRYPTO ? "" : " Every holding is US-listed: country exposure is United States 100%."}</p>`;
+}
+
+function bookPending(pend) {
+  const p = D.status.pending, aw = D.desk && D.desk.preview.awaiting;
+  const head = (p ? `<p class="note">The ${esc(p)} signal fills at the next close.</p>` : "") +
+    (aw ? `<p class="note dn">${esc(aw.kind)} waiting for approval since ${esc(aw.since)}: see Next trade.</p>` : "");
+  if (!pend.length) return head + `<p class="empty">No open orders at the broker.</p>`;
+  return head + table(["Time ET", "Side", CRYPTO ? "Coin" : "Ticker", "Qty", "Filled", "Status"], pend.map((o) =>
+    `<tr class="click" data-s="${esc(o.symbol)}"><td class="mut">${et(o.time)}</td><td class="${o.qty > 0 ? "up" : "dn"}">${o.qty > 0 ? "BUY" : "SELL"}</td>
+    <td class="s">${esc(o.symbol)}</td><td>${qty(Math.abs(o.qty))}</td><td>${qty(Math.abs(o.filled || 0))}</td><td class="mut">${esc(o.status.replace(/_/g, " "))}</td></tr>`));
+}
+
+function bookPositions() {
   const st = D.status, a = D.account, t = D.totals;
   const other = CRYPTO ? `<a href="index.html">Equities NAV <b>${money(a.equity_nav)}</b></a>`
     : a.crypto_enabled ? `<a href="crypto.html">Crypto NAV <b>${money(a.crypto_nav)}</b></a>` : `<span>Crypto held <b>${money(a.crypto_mv)}</b> (not managed)</span>`;
@@ -230,6 +332,29 @@ function bookLive(s, p) {
 }
 
 function renderBltr() {
+  setTabs("otabs", [["ord", "Orders"], ["tca", "TCA"]], otab, (k) => { otab = k; renderBltr(); });
+  bltrOrders();
+  if (otab === "tca") $("bltrb").innerHTML = bltrTCA();
+}
+
+function bltrTCA() {
+  const K = D.desk;
+  if (!K) return later;
+  const S = K.tca, rows = K.tca_rows.filter((r) => r.filled);
+  const na = CRYPTO ? '<span class="mut">n/a</span>' : null;
+  return `${kpiRow([["Fill rate", pct(S.fill_rate, 1, false)], ["Avg slippage", bps(S.slip_bps)], ["Delay", na || bps(S.delay_bps)],
+      ["Impact", na || bps(S.impact_bps)], ["Shortfall", `<span class="${S.shortfall > 0 ? "dn" : S.shortfall < 0 ? "up" : ""}">${money(S.shortfall)}</span>`],
+      ["Traded", money(S.notional)], ["Max % of volume", S.max_participation == null ? "–" : pct(S.max_participation, 4, false)], ["Assumed cost", S.assumed_bps + "bp"]])}
+    ${rows.length ? table(["Time ET", "Side", CRYPTO ? "Coin" : "Ticker", "Decision", ...(CRYPTO ? [] : ["Arrival"]), "Fill", ...(CRYPTO ? [] : ["Delay", "Impact"]), "Total", "% vol"],
+      rows.map((r) => `<tr class="click" data-s="${esc(r.symbol)}"><td class="mut">${et(r.time)}</td><td class="${r.side > 0 ? "up" : "dn"}">${r.side > 0 ? "BUY" : "SELL"}</td>
+        <td class="s">${esc(r.symbol)}</td><td>${price(r.decision)}</td>${CRYPTO ? "" : `<td>${price(r.arrival)}</td>`}<td>${price(r.fill)}</td>
+        ${CRYPTO ? "" : `<td class="${cls(-(r.delay_bps || 0))}">${bps(r.delay_bps)}</td><td class="${cls(-(r.impact_bps || 0))}">${bps(r.impact_bps)}</td>`}
+        <td class="${cls(-(r.slip_bps || 0))}">${bps(r.slip_bps)}</td><td class="mut">${r.participation == null ? "–" : pct(r.participation, 4, false)}</td></tr>`))
+      : `<p class="empty">No fills yet.</p>`}
+    <p class="note">Decision = the close when the signal was made. ${CRYPTO ? "" : "Arrival = the open of the fill day (orders go in before the open). Delay = the overnight move from decision to arrival; impact = fill vs arrival. "}Positive bp = cost. Shortfall = what slippage cost in dollars. % vol = shares filled ÷ that day's volume.</p>`;
+}
+
+function bltrOrders() {
   const sl = D.slippage, cost = D.status.cost_bps;
   $("slip").textContent = sl.n ? `avg slippage ${sl.avg_bps >= 0 ? "+" : ""}${sl.avg_bps.toFixed(1)}bp vs ${cost}bp assumed (${sl.n} fills)` : "times in New York";
   $("bltrb").innerHTML = D.blotter.length ? `<table><thead><tr><th>Time ET</th><th>Side</th><th>${CRYPTO ? "Coin" : "Ticker"}</th><th>Filled</th><th>Avg</th><th>Value</th><th>Slip</th><th>Status</th></tr></thead><tbody>${
@@ -246,6 +371,43 @@ function renderBltr() {
 }
 
 function renderSig() {
+  setTabs("stabs", CRYPTO ? [["scores", "Scores"], ["ic", "IC & decay"], ["cap", "Capacity"]]
+    : [["scores", "Scores"], ["ic", "IC & decay"], ["corr", "Correlation"], ["cap", "Crowding & capacity"]], stab, (k) => { stab = k; renderSig(); });
+  if (stab === "scores") return sigScores();
+  const S = D.desk && D.desk.signals;
+  $("sigb").innerHTML = !S ? later : stab === "ic" ? sigIC(S) : stab === "corr" ? sigCorr(S) : sigCap(S);
+}
+
+function sigIC(S) {
+  const H = S.horizons.map(String);
+  const rows = Object.entries(S.ic).map(([n, x]) => `<tr><td class="s">${esc(lab(n))}</td>${H.map((h) => {
+    const c = x[h] || {};
+    return `<td class="${cls(c.ic)}" title="t = ${c.t == null ? "–" : fmt(c.t, 1)}, n = ${c.n}">${c.ic == null ? "–" : fmt(c.ic, 3)}${c.t != null && Math.abs(c.t) >= 2 ? "*" : ""}</td>`;
+  }).join("")}${CRYPTO ? "" : `<td>${x[H[2]] && x[H[2]].hit != null ? pct(x[H[2]].hit, 0, false) : "–"}</td>`}</tr>`);
+  return table(["Signal", ...H.map((h) => `IC ${h}d`), ...(CRYPTO ? [] : [`Hit ${H[2]}d`])], rows) +
+    `<p class="note">Rank IC = correlation between a signal today and the next N days' returns, ${CRYPTO ? "pooled across coins and month-ends" : "across the " + D.universe.length + " names at each month-end"} since the data starts. Read across a row for decay: a real signal stays positive as N grows. * = |t| ≥ 2. ${CRYPTO ? "" : "Hit = share of months with a positive IC."}</p>`;
+}
+
+function sigCorr(S) {
+  const C = S.corr;
+  if (!C || !C.corr) return later;
+  return table(["", ...C.names.map((n) => esc(lab(n)))], C.corr.map((row, i) => `<tr><td class="s">${esc(lab(C.names[i]))}</td>${
+    row.map((v) => `<td style="background:${corrColor(v)};color:#000">${fmt(v)}</td>`).join("")}</tr>`)) +
+    `<p class="note">Average rank correlation between signals at month-ends over 3 years. High correlation means two signals bet on the same thing.</p>`;
+}
+
+function sigCap(S) {
+  const C = S.crowding || {}, P = S.capacity || {};
+  const crowd = Object.keys(C).length ? `<div class="sub">Crowding (co-movement of the top third)</div>${table(["Signal", "Now", "Median 3y", "Percentile"],
+    Object.entries(C).map(([n, c]) => `<tr><td class="s">${esc(lab(n))}</td><td>${fmt(c.now, 3)}</td><td class="mut">${fmt(c.median, 3)}</td>
+      <td>${dot(c.pct >= 0.9 ? "red" : c.pct >= 0.7 ? "amber" : "green")} ${pct(c.pct, 0, false)}</td></tr>`))}
+    <p class="note">Average pairwise correlation of the top-ranked names' market-adjusted returns over 63 days (Lou &amp; Polk's comomentum). When many funds hold the same names they move together; a high percentile warns of a crowded trade that can unwind fast.</p>` : "";
+  return crowd + `<div class="sub">Capacity</div>${table(["Portfolio", "Capacity", "Binding name", "Turnover / rebalance"],
+    Object.entries(P).map(([n, c]) => `<tr class="click" data-s="${esc(c.binding)}"><td class="s">${esc(lab(n))}</td><td>$${big(c.aum)}</td><td>${esc(c.binding)}</td><td>${pct(c.turnover, 0, false)}</td></tr>`))}
+    <p class="note">Fund size at which an average rebalance trade in any name is still under 10% of its daily dollar volume. Above it, the trades start moving prices against you.</p>`;
+}
+
+function sigScores() {
   if (CRYPTO) {
     $("sigb").innerHTML = `<table><thead><tr><th>Coin</th><th>Trend</th><th>20d</th><th>60d</th><th>120d</th><th>Vol</th><th>Target</th></tr></thead><tbody>${
       D.signals.map((s) => `<tr class="click" data-s="${esc(s.sym)}"><td class="s">${esc(s.sym)}</td><td class="${cls(s.alpha)}"><b>${fmt(s.alpha)}</b></td>
@@ -272,13 +434,69 @@ function corrColor(v) {
 }
 
 function renderRisk() {
+  const K = D.desk, bad = K ? K.limits.filter((x) => x.light !== "green").length : 0;
+  setTabs("rtabs", [["sum", "Summary"], ["model", "Factor model"], ["stress", "Stress"], ["liq", "Liquidity"],
+    ["lim", `Limits${bad ? ` <b class="${K.limits.some((x) => x.light === "red") ? "dn" : ""}">${bad}</b>` : ""}`]], rtab, (k) => { rtab = k; renderRisk(); });
+  $("risklabel").textContent = CRYPTO ? "Crypto sleeve" : "Equities sleeve";
+  $("riskb").innerHTML = rtab === "sum" ? riskSummary() : !K ? later
+    : rtab === "model" ? riskModel(K) : rtab === "stress" ? riskStress(K) : rtab === "liq" ? riskLiq(K) : riskLimits(K);
+  bindRows($("riskb"));
+}
+
+function riskModel(K) {
+  const M = K.model, T = M && M.total, A = M && M.active;
+  if (!T) return `<p class="empty">No positions to decompose yet.</p>`;
+  const G = CRYPTO ? ["Market", "Specific"] : ["Market", "Sector", "Style", "Specific"];
+  const share = (o, k) => o ? pct(o.groups[k], 0, false) : "–";
+  const nsec = M.names.length - 1 - Object.keys(T.styles).length;
+  return `<div class="rgrid">
+    <div><span>Total risk</span>${pct(T.vol, 1, false)}</div><div><span>Active risk vs ${esc(K.bench_label)}</span>${A ? pct(A.vol, 1, false) : "–"}</div>
+    <div><span>Factor risk</span>${pct(T.factor_vol, 1, false)}</div><div><span>Specific risk</span>${pct(T.specific_vol, 1, false)}</div></div>
+    <div class="sub">Where the risk comes from (share of variance)</div>
+    ${table(["Source", "Total", "Active", ""], G.map((k) => `<tr><td><i class="light" style="background:${css(GROUPS[k])}"></i> ${k}</td>
+      <td>${share(T, k)}</td><td class="mut">${share(A, k)}</td><td style="width:40%">${ubar(T.groups[k])}</td></tr>`))}
+    ${CRYPTO ? "" : `<div class="sub">Style factors</div>${table(["Factor", "Exposure (z)", "Factor vol", "Share of risk"],
+      Object.keys(T.styles).map((f) => `<tr><td>${esc(lab(f))}</td><td class="${cls(T.exposure[f])}">${fmt(T.exposure[f])}</td>
+        <td class="mut">${pct(M.factor_vol[f], 1, false)}</td><td class="${cls(T.styles[f])}">${pct(T.styles[f], 1)}</td></tr>`))}
+      <div class="sub">Sector risk (share of variance)</div>${hbars(T.sectors, Math.max(0.05, ...Object.values(T.sectors).map(Math.abs)), (v) => pct(v, 1))}`}
+    <div class="sub">Each position's share of risk</div>
+    ${table([CRYPTO ? "Coin" : "Ticker", "Weight", "Share of risk", "of which specific"], Object.entries(T.names).map(([s, n]) =>
+      `<tr class="click" data-s="${esc(s)}"><td class="s">${esc(s)}</td><td>${pct(n.w, 1, false)}</td><td>${pct(n.share, 1, false)}</td><td class="mut">${pct(n.specific, 1, false)}</td></tr>`))}
+    <p class="note">${CRYPTO ? `One-factor model on ${M.n} coins: the crypto market (average coin) plus coin-specific risk`
+      : `Cross-sectional model on ${M.n} S&amp;P 100 stocks: market + ${nsec} sectors + ${Object.keys(T.styles).length} styles + stock-specific`}, a year of daily returns, 90-day half-life. Shares add up to 100% of the forecast variance.</p>`;
+}
+
+function riskStress(K) {
+  const S = K.stress, r = D.risk, star = (x) => x.proxied.length ? ` <small class="mut" title="No price history then, moved with beta: ${esc(x.proxied.join(", "))}">*</small>` : "";
+  return `<div class="sub">Historical replay on today's weights</div>
+    ${table(["Scenario", "Window", CRYPTO ? "BTC" : "S&P 500", "Book", "P&L"], S.history.map((x) => `<tr><td>${esc(x.label)}${star(x)}</td>
+      <td class="mut">${x.start} → ${x.end}</td><td class="${cls(x.bench)}">${pct(x.bench, 1)}</td><td class="${cls(x.ret)}">${pct(x.ret, 1)}</td><td class="${cls(x.pnl)}">${smoney(x.pnl)}</td></tr>`))}
+    ${S.factor.length ? `<div class="sub">Factor shocks (risk model)</div>${table(["Shock", "Book", "P&L"], S.factor.map((x) =>
+      `<tr><td>${esc(x.label)}</td><td class="${cls(x.ret)}">${pct(x.ret, 1)}</td><td class="${cls(x.pnl)}">${smoney(x.pnl)}</td></tr>`))}` : ""}
+    <div class="sub">Parametric</div>${table(["Shock", "P&L"], [`<tr><td>${esc(r.stress.label)} × beta ${fmt(r.beta)}</td><td class="${cls(r.stress.pnl)}">${smoney(r.stress.pnl)}</td></tr>`])}
+    <p class="note">Each name's actual move over the window, applied to today's weights; a name with no price history then (*) moves with beta × the benchmark. Factor shocks move one style factor 3 standard deviations over a month, in the direction that hurts the book.</p>`;
+}
+
+function riskLiq(K) {
+  const L = K.liquidity;
+  return `<div class="rgrid"><div><span>Slowest exit</span>${days(L.max_days)} days</div><div><span>Sellable in 1 day</span>${pct(L.one_day, 0, false)}</div></div>
+    ${table([CRYPTO ? "Coin" : "Ticker", "Value", "ADV $", "% of ADV", "Days to exit"], L.rows.map((x) => `<tr class="click" data-s="${esc(x.sym)}"><td class="s">${esc(x.sym)}</td>
+      <td>${money(x.mv)}</td><td>$${big(x.adv)}</td><td>${pct(x.pct_adv, 4, false)}</td><td>${days(x.days)}</td></tr>`))}
+    <p class="note">Days to exit = position ÷ (${pct(L.participation, 0, false)} of 20-day average dollar volume), selling no more than a tenth of a normal day's trading.</p>`;
+}
+
+function riskLimits(K) {
+  return table(["", "Limit", "Type", "Now", "Max", "Used", ""], K.limits.map((x) => `<tr><td>${dot(x.light)}</td><td class="l">${esc(x.name)}</td>
+    <td class="mut">${x.kind}</td><td>${fmtv(x.value, x.fmt)}</td><td class="mut">${fmtv(x.limit, x.fmt)}</td><td>${pct(x.util, 0, false)}</td><td style="width:20%">${ubar(x.util, x.light)}</td></tr>`)) +
+    `<p class="note">Green under 90% of the limit, amber 90–100%, red at or over (also listed under Alerts). Hard limits are enforced by the trading job (order caps, position caps, drawdown halt); soft limits are monitored here. Change them under "limits" in live.json.</p>`;
+}
+
+function riskSummary() {
   const r = D.risk, st = D.status, a = D.account, nav = st.nav;
-  const sleeve = CRYPTO ? "Crypto sleeve" : "Equities sleeve";
-  $("risklabel").textContent = sleeve;
   const share = (v) => a.equity ? pct(v / a.equity, 0, false) : "–";
   const used = st.halt_at ? Math.min(1, Math.max(0, st.drawdown / st.halt_at)) : 0;
   const n = r.corr_syms.length;
-  $("riskb").innerHTML = `
+  return `
     <div class="acct"><span>Account <b>${money(a.equity)}</b></span><span>Equities <b>${money(a.equity_nav)}</b> ${share(a.equity_nav)}</span>
       <span>Crypto <b>${money(a.crypto_enabled ? a.crypto_nav : a.crypto_mv)}</b> ${share(a.crypto_enabled ? a.crypto_nav : a.crypto_mv)}</span></div>
     <div class="rgrid">
@@ -308,6 +526,75 @@ function renderMth() {
       `<td style="background:${m.cols[j] === "Year" ? "transparent" : shade(v)}" class="${m.cols[j] === "Year" ? cls(v) : ""}">${v == null ? "" : (v * 100).toFixed(1)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
 }
 
+function renderPre() {
+  const K = D.desk;
+  if (!K) { $("preb").innerHTML = later; return; }
+  const P = K.preview, R = P.rebalance, n = P.next, S = P.swap;
+  $("prelabel").textContent = P.require_approval ? "approval required" : "automatic";
+  const orders = (o) => o.length ? table(["Side", CRYPTO ? "Coin" : "Ticker", "Qty", "Price", "Notional", ""], o.map((x) =>
+    `<tr class="click" data-s="${esc(x.sym)}"><td class="${x.qty > 0 ? "up" : "dn"}">${x.qty > 0 ? "BUY" : "SELL"}</td><td class="s">${esc(x.sym)}</td>
+    <td>${qty(Math.abs(x.qty))}</td><td>${price(x.px)}</td><td>${money(Math.abs(x.notional))}</td>
+    <td>${x.capped ? '<small class="dn" title="Cut to the maximum order size">capped</small>' : ""}</td></tr>`))
+    : `<p class="empty">No trades: the book already matches the target.</p>`;
+  const sum = (x) => kpiRow([["Buys", money(x.buys)], ["Sells", money(x.sells)], ["Turnover", pct(x.turnover, 1, false)], ["Est. cost", money(x.cost)],
+    ["Gross after", pct(x.post_gross, 0, false)], ["Max weight", pct(x.post_max, 1, false)],
+    [CRYPTO ? "Cash after" : "Max sector", CRYPTO ? pct(1 - x.post_gross, 0, false) : pct(x.post_max_sector, 0, false)], ["Names after", x.post_names]]);
+  const appr = P.require_approval
+    ? `<div class="appr">${P.awaiting ? `<b class="dn">${esc(P.awaiting.kind)} waiting since ${esc(P.awaiting.since)}</b>` : "<span>Each rebalance and swap waits for approval.</span>"}
+       <a class="go" href="${esc(P.approve_url)}" target="_blank" rel="noopener">Approve in GitHub</a>
+       <small class="mut">Run workflow → approve: ${CRYPTO ? "crypto" : "equity"}</small></div>`
+    : `<p class="note">Approval is off, so trades go through automatically. Set <code>"require_approval": true</code> in live.json${CRYPTO ? ' under "crypto"' : ""} to make each rebalance wait for your OK.</p>`;
+  $("preb").innerHTML = `<div class="acct"><span>Next rebalance <b>${esc(n.rebalance || "–")}</b></span>${n.swap ? `<span>Next swap check <b>${esc(n.swap)}</b></span>` : ""}
+      <span>Max order <b>${money(P.max_order)}</b></span><span>Min trade <b>${money(P.min_trade)}</b></span></div>
+    ${appr}
+    <div class="sub">Rebalance, if it ran on today's prices</div>${sum(R)}${orders(R.orders)}
+    ${S ? `<div class="sub">Swap check: ${S.drop.length ? `drop ${S.drop.map((s) => `${esc(s)} <span class="dn">${pct(S.pnl[s], 1)}</span>`).join(", ")} → add ${S.add.map(esc).join(", ")}`
+      : "nothing would be swapped"}</div>${S.drop.length ? orders(S.orders) : ""}` : ""}
+    <p class="note">Built with the trading job's own sizing (targets, caps, minimum trade, max order) on today's prices; the real run uses that day's close.</p>`;
+  bindRows($("preb"));
+}
+
+function renderDH() {
+  const K = D.desk;
+  const age = LIVE.lastTick ? (Date.now() - LIVE.lastTick) / 1000 : null;
+  const closed = !CRYPTO && !nyseOpen();
+  const feed = LIVE.status !== "on" ? ["warn", LIVE.status === "off" ? "not connected: prices are delayed" : LIVE.status]
+    : age == null ? [closed ? "ok" : "warn", `${FEED.name} connected, no ticks yet${closed ? " (market closed)" : ""}`]
+    : [age < 60 || closed ? "ok" : "warn", `${FEED.name}: last tick ${age < 1 ? "<1" : Math.round(age)}s ago, ${LIVE.subs.length} symbols`];
+  const gen = (Date.now() - new Date(D.generated_at)) / 60000;
+  const built = [gen < 45 || (!nyseOpen() && gen < 72 * 60) ? "ok" : gen < 24 * 60 ? "warn" : "fail", `built ${Math.round(gen)} min ago (${et(D.generated_at)} ET)`];
+  const all = [[built[0], "Terminal data", built[1]], [feed[0], "Live feed", feed[1]], ...(K ? K.health.map((h) => [h.status, h.check, h.detail]) : [])];
+  const bad = all.filter((x) => x[0] !== "ok").length;
+  $("dhlabel").innerHTML = bad ? `<span class="dn">${bad} to check</span>` : `<span class="up">all clear</span>`;
+  $("dhb").innerHTML = table(["", "Check", "Detail"], all.map(([s, c, d]) =>
+    `<tr><td>${dot(s)}</td><td class="l">${esc(c)}</td><td class="mut wrap">${esc(d)}</td></tr>`));
+}
+
+function renderAud() {
+  const K = D.desk;
+  if (!K) { $("audb").innerHTML = later; return; }
+  const C = K.controls, now = K.alerts_now;
+  setTabs("atabs", [["alerts", `Alerts${now.length ? ` <b class="dn">${now.length}</b>` : ""}`], ["audit", "Audit trail"], ["ctl", "Controls"]], atab,
+    (k) => { atab = k; renderAud(); });
+  if (atab === "alerts") {
+    $("audb").innerHTML = `<div class="sub">Now</div>${now.length ? table(["", "Alert"], now.map((a) => `<tr><td>${dot("red")}</td><td class="wrap">${esc(a)}</td></tr>`))
+      : `<p class="empty">No limit breached, no failing data check.</p>`}
+      <div class="sub">From trading runs</div>${C.alerts.length ? table(["Time ET", "Alert"], C.alerts.map((a) => `<tr><td class="mut">${et(a.time)}</td><td class="wrap">${esc(a.alert)}</td></tr>`))
+      : `<p class="empty">None recorded.</p>`}
+      <p class="note">A trading run that raises an alert also fails its GitHub job, and GitHub emails you.</p>`;
+  } else if (atab === "audit") {
+    $("audb").innerHTML = C.audit.length ? table(["Time ET", "By", "How", "Orders", "What happened"], C.audit.map((a) => `<tr>
+      <td class="mut">${et(a.time)}</td><td>${esc(a.actor)}</td><td class="mut">${a.run ? `<a href="${REPO}/actions/runs/${esc(a.run)}" target="_blank" rel="noopener">${esc(a.trigger)}</a>` : esc(a.trigger)}${
+        a.sha ? ` <a href="${REPO}/commit/${esc(a.sha)}" target="_blank" rel="noopener">${esc(a.sha)}</a>` : ""}</td><td>${a.orders}</td>
+      <td class="wrap">${esc((a.events || []).join("; ") || "no action")}${a.alerts && a.alerts.length ? ` <span class="dn">${esc(a.alerts.join("; "))}</span>` : ""}</td></tr>`))
+      : `<p class="empty">The audit trail starts with the next trading run.</p>`;
+  } else {
+    $("audb").innerHTML = `<div class="sub">Controls</div>${table(["", "Control", "State"], C.controls.map(([n, v, s]) =>
+      `<tr><td>${dot(s)}</td><td class="l">${esc(n)}</td><td class="wrap">${esc(v)}</td></tr>`))}
+      <div class="sub">Who can do what</div>${table(["Action", "Who"], C.permissions.map(([a, w]) => `<tr><td class="l">${esc(a)}</td><td class="wrap mut">${esc(w)}</td></tr>`))}`;
+  }
+}
+
 function renderStatus() {
   const st = D.status;
   $("asof").textContent = D.as_of;
@@ -324,8 +611,7 @@ function tick() {
   const ny = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
   $("ny").textContent = ny.toTimeString().slice(0, 8);
   $("utc").textContent = now.toISOString().slice(11, 19);
-  const mins = ny.getHours() * 60 + ny.getMinutes(), wd = ny.getDay();
-  const open = CRYPTO || (wd > 0 && wd < 6 && mins >= 570 && mins < 960);
+  const open = CRYPTO || nyseOpen();
   $("mkt").innerHTML = CRYPTO ? `<b class="open">Crypto 24/7</b>` : open ? `<b class="open">NYSE open</b>` : `<b class="closed">NYSE closed</b>`;
   if (LIVE.status === "on") $("livebtn").textContent = open ? `LIVE · ${FEED.name}${LIVE.backup ? " (backup)" : ""}` : "LIVE · market closed";
 }
@@ -359,7 +645,7 @@ function run(text) {
   if (PAGES[t[0]]) { if (!location.pathname.endsWith(PAGES[t[0]]) && !(PAGES[t[0]] === "index.html" && !CRYPTO)) location.href = PAGES[t[0]]; return; }
   if (t[0] === "LIVE" && t[1] === "LIST") { mtab = "live"; renderMon(); return focusPanel("mon"); }
   if (t[0] === "LIVE") return t[1] === "OFF" ? disconnectLive() : openLiveDialog();
-  if (FUNCS[t[0]]) return focusPanel(FUNCS[t[0]][0]);
+  if (FUNCS[t[0]]) { if (D && FUNCS[t[0]][2]) FUNCS[t[0]][2](); return focusPanel(FUNCS[t[0]][0]); }
   const s = resolveSym(t[0]);
   if (s && loadSym(s)) return focusPanel("gp");
   const best = suggest(t[0])[0];
@@ -618,6 +904,7 @@ function track(s) {
 }
 
 function trade(s, p) {
+  LIVE.lastTick = Date.now();
   if (LIVE.open[s] == null) LIVE.open[s] = p;
   LIVE.hi[s] = Math.max(LIVE.hi[s] ?? p, p);
   LIVE.lo[s] = Math.min(LIVE.lo[s] ?? p, p);
@@ -702,6 +989,7 @@ async function load() {
   if (!sym || !D.ohlc[sym]) sym = D.ohlc[h] ? h : CRYPTO ? D.universe[0] : "SPY";
   if (!LIVE.subs.length) initTracked();
   renderStatus(); renderStrip(); renderMon(); renderGP(); renderPerf(); renderBook(); renderBltr(); renderSig(); renderRisk(); renderMth();
+  renderPre(); renderDH(); renderAud();
   for (const k of Object.keys(LIVE.last)) applyLive(k, false);
   if (Object.keys(LIVE.last).length) renderBook();
   if (!LIVE.started) {
@@ -712,4 +1000,5 @@ async function load() {
   }
 }
 tick(); setInterval(tick, 1000);
+setInterval(() => D && renderDH(), 5000);
 load(); setInterval(load, 5 * 60 * 1000);

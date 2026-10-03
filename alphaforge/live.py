@@ -38,6 +38,8 @@ DEFAULTS = {
     "max_order_notional": 25_000, # fat-finger limit per order
     "max_drawdown_halt": 0.20,    # flatten the sleeve and halt when NAV falls this far below its peak
     "max_data_age_days": 4,       # refuse to trade on stale prices
+    "require_approval": False,    # true: a rebalance or swap waits until a run with ALPHAFORGE_APPROVE=equity|all
+    "limits": {},                 # monitoring limits shown on the terminal (see terminal.LIMITS)
 }
 CRYPTO_DEFAULTS = {
     "enabled": False,
@@ -53,6 +55,7 @@ CRYPTO_DEFAULTS = {
     "cash_buffer": 0.02,          # crypto buys need settled cash; keep 2% for fees and price moves
     "max_drawdown_halt": 0.50,    # backtest max drawdown is ~48%; a tighter halt would stop it in normal swings
     "max_data_age_days": 3,
+    "require_approval": False,
 }
 _CBD = pd.offsets.CustomBusinessDay(calendar=USFederalHolidayCalendar())
 
@@ -255,24 +258,44 @@ def step_sleeve(name, sc, prices, broker, m, nav, positions, d, state_dir):
                 events.append(f"executed {p['signal_date']} rebalance")
             m["pending"] = None
             positions = {s: q for s, q in broker.positions().items() if q["cls"] == sc["cls"]}
-        if signal_due(name, sc, date, m):
+        waiting = m.get("awaiting") or {}
+        approved = os.environ.get("ALPHAFORGE_APPROVE") in (name, "all")
+        reb, swp = signal_due(name, sc, date, m) or waiting.get("kind") == "rebalance", False
+        if not reb:
+            swp = swap_due(prices.index, m, strat)
+        if (reb or swp) and sc.get("require_approval") and not approved:
+            kind = "rebalance" if reb else "swap"
+            if waiting.get("kind") != kind:
+                alerts.append(f"{name}: {kind} is waiting for approval (Actions > terminal > Run workflow > approve)")
+            m["awaiting"] = {"kind": kind, "since": waiting.get("since", d) if waiting.get("kind") == kind else d}
+            events.append(f"{kind} waiting for approval")
+            reb = swp = False
+        elif reb or swp:
+            if sc.get("require_approval"):
+                events.append(f"{'rebalance' if reb else 'swap'} approved by {os.environ.get('GITHUB_ACTOR', 'operator')}")
+            m["awaiting"] = None
+        if reb:
             alpha = signals.alpha_panel(prices, strat)
             w = backtest.targets_at(alpha, rets, len(prices) - 1, strat)
             w = {k: round(float(v), 6) for k, v in w.items() if v and np.isfinite(v)}
-            m["last_signal"] = d
+            m["last_signal"], m["target"] = d, w
             events.append("generated month-end signal" if name == "equity" else "generated weekly signal")
             if broker.queues_orders:
                 broker.cancel_stale(sc["cls"], prefix)
                 fills += submit_all(broker, plan_orders(w, positions, nav, px, sc), px, f"{prefix}-rb")
             else:
                 m["pending"] = {"signal_date": d, "weights": w}  # fill at next close
-        elif swap_due(prices.index, m, strat):
+        elif swp:
             m["last_swap"] = d
             held = {s: float(px[s]) / q["avg_cost"] - 1 for s, q in positions.items()
                     if q["qty"] > 0 and s in px and s in prices.columns and q["avg_cost"] > 0}
             alpha = signals.alpha_panel(prices, strat)
             drop, add = portfolio.pick_swaps(held, alpha.iloc[-1], strat.swap_count)
             events.append(f"swap check: drop {drop or 'none'}, add {add or 'none'}")
+            if drop and m.get("target"):
+                t = dict(m["target"])
+                freed = sum(t.pop(s, 0.0) for s in drop)
+                m["target"] = {**t, **{s: round(freed / len(add), 6) for s in add}}
             if drop and broker.queues_orders:
                 broker.cancel_stale(sc["cls"], prefix)
                 fills += submit_all(broker, swap_orders(drop, add, positions, px, sc), px, f"{prefix}-sw")
@@ -358,8 +381,20 @@ def run(lc, prices, state_dir="state", broker=None, today=None, crypto_prices=No
     with open(f"{state_dir}/orders.jsonl", "a") as f:
         for fl in fills:
             f.write(json.dumps({"date": d, **fl}, default=float) + "\n")
+    now = pd.Timestamp.now(tz="UTC").isoformat(timespec="seconds")
+    meta["last_run"] = now
     with open(meta_path, "w") as f:
         json.dump(meta, f, indent=1)
+    env = os.environ.get
+    with open(f"{state_dir}/audit.jsonl", "a") as f:  # who ran what, from which commit
+        f.write(json.dumps({"time": now, "date": d, "actor": env("GITHUB_ACTOR", "local"),
+                            "trigger": env("GITHUB_EVENT_NAME", "manual"), "run": env("GITHUB_RUN_ID"),
+                            "sha": (env("GITHUB_SHA") or "")[:7] or None, "approve": env("ALPHAFORGE_APPROVE") or None,
+                            "events": events, "orders": len(fills), "alerts": alerts}) + "\n")
+    if alerts:
+        with open(f"{state_dir}/alerts.jsonl", "a") as f:
+            for a in alerts:
+                f.write(json.dumps({"time": now, "alert": a}) + "\n")
     return {"date": d, "equity": after["equity"], "account": after["account"], "navs":
             {k: after[k] for k in ("equity", "crypto") if k in after}, "fills": fills, "events": events,
             "halted": any(meta[k].get("halted") for k in data), "alerts": alerts}
@@ -388,8 +423,9 @@ def main():
     core = lc["universe"] + ["SPY", "^IRX"] + list(MARKET_STRIP.values())
     raw = download(core, lc["history_start"])
     extra = [s for s in lc["watchlist"] if s not in core]
-    if extra:  # watch-only names need ~1 year for charts and 52-week ranges, not the full backtest history
-        start = (pd.Timestamp.now() - pd.Timedelta(days=400)).strftime("%Y-%m-%d")
+    if extra:  # watch-only names don't need the full backtest history
+        # ~800 days: a year of charts plus a year of factor history for the risk model
+        start = (pd.Timestamp.now() - pd.Timedelta(days=800)).strftime("%Y-%m-%d")
         raw = pd.concat([raw, download(extra, start)], axis=1)
     prices, bench = load_prices(lc["universe"], None, raw=raw)
     cprices, craw = load_crypto(lc) if lc["crypto"]["enabled"] else (None, None)
