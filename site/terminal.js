@@ -33,7 +33,7 @@ const FUNCS = {
 };
 const EXTRA = {
   HELP: "List of commands", LIVE: "Connect real-time prices", "LIVE OFF": "Disconnect real-time prices",
-  ...(CRYPTO ? {} : { "LIVE LIST": "Live-tracked tickers" }),
+  "LIVE LIST": "Live-tracked tickers",
   EQUITY: "Open the equities page", CRYPTO: "Open the crypto page",
 };
 const PAGES = { EQUITY: "index.html", EQ: "index.html", STOCKS: "index.html", CRYPTO: "crypto.html", CRY: "crypto.html" };
@@ -73,22 +73,17 @@ const nm = (s) => (D.names[s] || [s])[0];
 
 function renderMon() {
   const uni = new Set(D.universe), trk = new Set(LIVE.subs);
-  if (CRYPTO) {
-    $("mtabs").innerHTML = "";
-    $("livecount").textContent = LIVE.status === "on" ? "● streaming" : "";
-  } else {
-    $("mtabs").innerHTML = [["all", `All ${Object.keys(D.quotes).length}`], ["strat", "Strategy"], ["live", "Live"]].map(([k, l]) =>
-      `<button aria-pressed="${k === mtab}" data-k="${k}">${l}</button>`).join("");
-    $("mtabs").querySelectorAll("button").forEach((b) => b.onclick = () => { mtab = b.dataset.k; renderMon(); });
-    $("livecount").textContent = `● ${LIVE.subs.length}/${MAX_SYMS} live`;
-  }
+  $("mtabs").innerHTML = [["all", `All ${Object.keys(D.quotes).length}`], ["strat", "Strategy"], ["live", "Live"]].map(([k, l]) =>
+    `<button aria-pressed="${k === mtab}" data-k="${k}">${l}</button>`).join("");
+  $("mtabs").querySelectorAll("button").forEach((b) => b.onclick = () => { mtab = b.dataset.k; renderMon(); });
+  $("livecount").textContent = `● ${LIVE.subs.length}/${MAX_SYMS} live`;
   const keep = mtab === "strat" ? (s) => uni.has(s) : mtab === "live" ? (s) => trk.has(s) : () => true;
-  const rows = Object.entries(D.quotes).filter(([s, q]) => q && (CRYPTO || keep(s)));
-  if (!CRYPTO && mtab === "live") rows.sort((a, b) => LIVE.subs.indexOf(b[0]) - LIVE.subs.indexOf(a[0]));
+  const rows = Object.entries(D.quotes).filter(([s, q]) => q && keep(s));
+  if (mtab === "live") rows.sort((a, b) => LIVE.subs.indexOf(b[0]) - LIVE.subs.indexOf(a[0]));  // newest first
   else rows.sort((a, b) => b[1].pct - a[1].pct);
   $("monb").innerHTML = `<table><thead><tr><th>${CRYPTO ? "Coin" : "Ticker"}</th><th>Last</th><th>Chg%</th><th>YTD</th><th>30d</th></tr></thead><tbody>${
     rows.map(([s, q]) => `<tr class="click ${s === sym ? "on" : ""}" data-s="${esc(s)}" tabindex="0" title="${esc(nm(s))}">
-      <td class="s">${esc(s)}${!CRYPTO && trk.has(s) ? '<span class="dot" title="Live tracked" aria-label="live tracked">●</span>' : ""}</td>
+      <td class="s">${esc(s)}${trk.has(s) ? '<span class="dot" title="Live tracked" aria-label="live tracked">●</span>' : ""}</td>
       <td class="lv">${price(q.last)}</td><td class="${cls(q.pct)}">${pct(q.pct)}</td>
       <td class="${cls(q.ytd)}">${pct(q.ytd, 1)}</td><td>${spark(q.spark)}</td></tr>`).join("")}</tbody></table>`;
   bindRows($("monb"));
@@ -108,7 +103,7 @@ function renderGP() {
   const [name, sector] = D.names[sym] || [sym, ""];
   $("ghead").innerHTML = `<b class="sym">${esc(sym)}</b><span>${esc(name)}${sector && !CRYPTO ? " · " + esc(sector) : ""}</span>
     <b class="px lv" id="gpx">${price(q.last)}</b><b class="${cls(q.pct)}" id="gchg">${price(q.chg, q.last)} ${pct(q.pct)}</b>
-    ${LIVE.status === "on" && (CRYPTO || LIVE.subs.includes(sym)) ? `<span class="trk">● live</span>` : ""}
+    ${LIVE.subs.includes(sym) ? `<span class="trk">● live tracked</span>` : ""}
     <span>52w <b>${price(q.lo52)} – ${price(q.hi52)}</b></span><span>Avg vol <b>${big(q.vol20)}</b></span>
     ${s ? `<span>${CRYPTO ? "Trend" : "Alpha"} <b class="${cls(s.alpha)}">${fmt(s.alpha)}</b></span><span>Target <b>${pct(s.target, 1, false)}</b></span>` : ""}`;
   $("range").innerHTML = [[22, "1M"], [65, "3M"], [130, "6M"], [CRYPTO ? 365 : 260, "1Y"]].map(([n, l]) =>
@@ -337,7 +332,7 @@ function tick() {
 
 function loadSym(s) {
   if (!D.ohlc[s]) return false;
-  sym = s; if (!CRYPTO) track(s); renderGP(); renderMon();
+  sym = s; track(s); renderGP(); renderMon();
   try { history.replaceState(null, "", "#" + encodeURIComponent(s)); } catch (e) {}
   return true;
 }
@@ -362,7 +357,7 @@ function run(text) {
   if (!t.length) return;
   if (t[0] === "HELP" || t[0] === "?") return $("help").showModal();
   if (PAGES[t[0]]) { if (!location.pathname.endsWith(PAGES[t[0]]) && !(PAGES[t[0]] === "index.html" && !CRYPTO)) location.href = PAGES[t[0]]; return; }
-  if (t[0] === "LIVE" && t[1] === "LIST" && !CRYPTO) { mtab = "live"; renderMon(); return focusPanel("mon"); }
+  if (t[0] === "LIVE" && t[1] === "LIST") { mtab = "live"; renderMon(); return focusPanel("mon"); }
   if (t[0] === "LIVE") return t[1] === "OFF" ? disconnectLive() : openLiveDialog();
   if (FUNCS[t[0]]) return focusPanel(FUNCS[t[0]][0]);
   const s = resolveSym(t[0]);
@@ -459,8 +454,8 @@ addEventListener("resize", () => {
 // ---------------------------------------------------------------- live prices (Alpaca market data; keys stay in this browser)
 
 const STREAM = CRYPTO ? "wss://stream.data.alpaca.markets/v1beta3/crypto/us" : "wss://stream.data.alpaca.markets/v2/iex";
-const MAX_SYMS = 30; // Alpaca free plan: 30 stock symbols per stream
-const KEY_STORE = "alphaforge.alpaca", TRACK_STORE = "alphaforge.tracked";
+const MAX_SYMS = 30; // Alpaca free plan: 30 symbols per stream; the same rule on both pages
+const KEY_STORE = "alphaforge.alpaca", TRACK_STORE = CRYPTO ? "alphaforge.tracked.crypto" : "alphaforge.tracked";
 const toAlpaca = (s) => CRYPTO ? s : s.replace("-", "."), fromAlpaca = (s) => CRYPTO ? s : s.replace(".", "-");
 const LIVE = { status: "off", creds: null, ws: null, subs: [], last: {}, prevTick: {}, hi: {}, lo: {}, open: {}, dirty: new Set(), started: false };
 
@@ -509,7 +504,6 @@ function connectLive(creds) {
   if (LIVE.ws) { LIVE.ws.onclose = null; LIVE.ws.close(); }
   LIVE.creds = creds;
   setLive("connecting");
-  if (CRYPTO) LIVE.subs = Object.keys(D.quotes);
   const w = new WebSocket(STREAM);
   LIVE.ws = w;
   w.onopen = () => w.send(JSON.stringify({ action: "auth", key: creds.key, secret: creds.secret }));
@@ -534,11 +528,10 @@ function connectLive(creds) {
 }
 
 function initTracked() {
-  if (CRYPTO) { LIVE.subs = Object.keys(D.quotes); return; }
   // Oldest first. Saved picks win; otherwise start with the strategy's names (SPY drops first if full).
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem(TRACK_STORE)); } catch (e) {}
-  const base = Array.isArray(saved) && saved.length ? saved : ["SPY", ...D.universe];
+  const base = Array.isArray(saved) && saved.length ? saved : CRYPTO ? [...D.universe] : ["SPY", ...D.universe];
   LIVE.subs = [...new Set(base)].filter((x) => D.quotes[x]).slice(-MAX_SYMS);
 }
 
