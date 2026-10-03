@@ -52,14 +52,14 @@
 </main>
 
 <nav class="fkeys" id="fkeys" aria-label="Functions"></nav>
-<p class="foot">Crypto sleeve, kept separate from the stock strategy. Daily data from Yahoo Finance; live prices and account data from Alpaca. Nothing here is investment advice.
+<p class="foot">Crypto sleeve, kept separate from the stock strategy. Daily data from Yahoo Finance; live prices from Alpaca, or Coinbase as the backup; account data from Alpaca. Nothing here is investment advice.
   <a href="https://github.com/z125081-Sam-Lam/alphaforge">Source</a> · <a href="https://github.com/z125081-Sam-Lam/alphaforge/blob/main/docs/MATH.md">Model</a> ·
   <a href="https://github.com/z125081-Sam-Lam/alphaforge/blob/main/docs/RESEARCH.md">Research</a> ·
   Charts by <a href="https://www.tradingview.com/lightweight-charts/">TradingView Lightweight Charts</a></p>
 
 <dialog id="livedlg">
   <h3>Live prices</h3>
-  <p>Streams real-time crypto trades from Alpaca, 24/7, for up to 30 coins. Every coin you open is live tracked; past 30, the one you opened longest ago drops off. Use the API key from an Alpaca <b>paper</b> account: it can read market data and can't touch real money. One key works on both pages.</p>
+  <p>Crypto prices stream live 24/7. With your Alpaca key saved they come from Alpaca, so they match your account; without a key, or if Alpaca fails, they come from Coinbase's public feed. Leave the fields empty and press Connect to use Coinbase. Every coin you open is live tracked; past 30, the one you opened longest ago drops off. Use the API key from an Alpaca <b>paper</b> account: it can read market data and can't touch real money.</p>
   <form method="dialog">
     <label>API key ID <input id="lk" autocomplete="off" spellcheck="false"></label>
     <label>Secret key <input id="ls" type="password" autocomplete="off"></label>

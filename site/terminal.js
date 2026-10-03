@@ -327,7 +327,7 @@ function tick() {
   const mins = ny.getHours() * 60 + ny.getMinutes(), wd = ny.getDay();
   const open = CRYPTO || (wd > 0 && wd < 6 && mins >= 570 && mins < 960);
   $("mkt").innerHTML = CRYPTO ? `<b class="open">Crypto 24/7</b>` : open ? `<b class="open">NYSE open</b>` : `<b class="closed">NYSE closed</b>`;
-  if (LIVE.status === "on") $("livebtn").textContent = open ? `LIVE · ${CRYPTO ? "Alpaca" : "IEX"}` : "LIVE · market closed";
+  if (LIVE.status === "on") $("livebtn").textContent = open ? `LIVE · ${FEED.name}` : "LIVE · market closed";
 }
 
 function loadSym(s) {
@@ -451,13 +451,39 @@ addEventListener("resize", () => {
   for (const [c, el] of [[gpChart, $("gpc")], [pChart, $("pc")]]) if (c) c.applyOptions({ width: el.clientWidth });
 });
 
-// ---------------------------------------------------------------- live prices (Alpaca market data; keys stay in this browser)
+// ---------------------------------------------------------------- live prices
+// Equities stream from Alpaca's IEX feed (needs an API key). Crypto streams from Alpaca when a key is
+// saved, so prices match the account, and falls back to Coinbase's public feed (no key) when there is
+// no key or Alpaca fails. Keys stay in this browser.
 
-const STREAM = CRYPTO ? "wss://stream.data.alpaca.markets/v1beta3/crypto/us" : "wss://stream.data.alpaca.markets/v2/iex";
+const alpacaFeed = (name, url, wire, unwire) => ({
+  name, keyed: true, url, wire, unwire,
+  hello: (c) => ({ action: "auth", key: c.key, secret: c.secret }),
+  sub: (syms) => ({ action: "subscribe", trades: syms }),
+  unsub: (syms) => ({ action: "unsubscribe", trades: syms }),
+  handle(m, w) {
+    if (m.T === "success" && m.msg === "authenticated") { w.send(JSON.stringify(this.sub(LIVE.subs.map(this.wire)))); return "on"; }
+    if (m.T === "t") trade(this.unwire(m.S), m.p);
+    if (m.T === "error") return `error:Alpaca ${m.code}: ${m.msg}${m.code === 406 ? " (another window is already streaming)" : ""}`;
+  },
+});
+const IEX = alpacaFeed("IEX", "wss://stream.data.alpaca.markets/v2/iex", (s) => s.replace("-", "."), (s) => s.replace(".", "-"));
+const ALPACA_CRYPTO = alpacaFeed("Alpaca", "wss://stream.data.alpaca.markets/v1beta3/crypto/us", (s) => s, (s) => s);
+const COINBASE = {
+  name: "Coinbase", keyed: false, url: "wss://ws-feed.exchange.coinbase.com",
+  wire: (s) => s.replace("/", "-"), unwire: (s) => s.replace("-", "/"),
+  sub: (syms) => ({ type: "subscribe", product_ids: syms, channels: ["ticker"] }),
+  unsub: (syms) => ({ type: "unsubscribe", product_ids: syms, channels: ["ticker"] }),
+  handle(m) {
+    if (m.type === "subscriptions") return "on";
+    if (m.type === "ticker" && m.price) trade(this.unwire(m.product_id), +m.price);
+    if (m.type === "error") return `error:Coinbase: ${m.message}${m.reason ? " (" + m.reason + ")" : ""}`;
+  },
+};
+let FEED = CRYPTO ? COINBASE : IEX;
 const MAX_SYMS = 30; // Alpaca free plan: 30 symbols per stream; the same rule on both pages
 const KEY_STORE = "alphaforge.alpaca", TRACK_STORE = CRYPTO ? "alphaforge.tracked.crypto" : "alphaforge.tracked";
-const toAlpaca = (s) => CRYPTO ? s : s.replace("-", "."), fromAlpaca = (s) => CRYPTO ? s : s.replace(".", "-");
-const LIVE = { status: "off", creds: null, ws: null, subs: [], last: {}, prevTick: {}, hi: {}, lo: {}, open: {}, dirty: new Set(), started: false };
+const LIVE = { status: "off", want: false, creds: null, ws: null, backup: "", subs: [], last: {}, prevTick: {}, hi: {}, lo: {}, open: {}, dirty: new Set(), started: false };
 
 function savedCreds() { try { return JSON.parse(localStorage.getItem(KEY_STORE)); } catch (e) { return null; } }
 
@@ -465,8 +491,10 @@ function setLive(status, note = "") {
   LIVE.status = status;
   const b = $("livebtn");
   b.className = "badge live-" + status;
-  b.textContent = { off: "Delayed · connect live", connecting: "LIVE · connecting", on: "LIVE", error: "LIVE · error" }[status];
-  b.title = note;
+  b.textContent = { off: CRYPTO ? "Paused · click for live" : "Delayed · connect live", connecting: "LIVE · connecting",
+    on: `LIVE · ${FEED.name}${LIVE.backup ? " (backup)" : ""}`, error: "LIVE · error" }[status];
+  b.title = note || (LIVE.backup ? `Alpaca failed (${LIVE.backup}); streaming from Coinbase instead.`
+    : FEED === COINBASE ? "Real-time prices from Coinbase's public feed. Click to stream from Alpaca with your key." : "");
   $("lerr").textContent = status === "error" ? note : "";
   if (status === "on") tick();
 }
@@ -488,42 +516,57 @@ $("livedlg").addEventListener("close", () => {
   if (v === "disconnect") return disconnectLive();
   if (v !== "connect") return;
   const creds = { key: $("lk").value.trim(), secret: $("ls").value.trim() };
-  if (!creds.key || !creds.secret) return setLive("error", "Enter both the key ID and the secret.");
+  if (!creds.key || !creds.secret) {
+    if (CRYPTO) return connectLive(null);  // no key: Coinbase
+    return setLive("error", "Enter both the key ID and the secret.");
+  }
   try { $("lremember").checked ? localStorage.setItem(KEY_STORE, JSON.stringify(creds)) : localStorage.removeItem(KEY_STORE); } catch (e) {}
   connectLive(creds);
 });
 
 function disconnectLive() {
-  LIVE.creds = null;
+  LIVE.want = false;
   if (LIVE.ws) LIVE.ws.close();
   LIVE.ws = null;
   setLive("off");
 }
 
-function connectLive(creds) {
+function fallBack(reason) {
+  // Crypto only: if Alpaca can't stream, keep the page live from Coinbase.
+  if (!CRYPTO || FEED === COINBASE) return false;
+  LIVE.backup = reason;
+  connectLive(null, true);
+  return true;
+}
+
+function connectLive(creds, keepBackup = false) {
   if (LIVE.ws) { LIVE.ws.onclose = null; LIVE.ws.close(); }
-  LIVE.creds = creds;
+  if (!keepBackup) LIVE.backup = "";
+  FEED = creds ? (CRYPTO ? ALPACA_CRYPTO : IEX) : COINBASE;
+  LIVE.want = true; LIVE.creds = creds;
   setLive("connecting");
-  const w = new WebSocket(STREAM);
+  const w = new WebSocket(FEED.url);
+  const feed = FEED;
+  let up = false;
   LIVE.ws = w;
-  w.onopen = () => w.send(JSON.stringify({ action: "auth", key: creds.key, secret: creds.secret }));
+  w.onopen = () => w.send(JSON.stringify(feed.keyed ? feed.hello(creds) : feed.sub(LIVE.subs.map(feed.wire))));
   w.onmessage = (e) => {
-    for (const m of JSON.parse(e.data)) {
-      if (m.T === "success" && m.msg === "authenticated") {
-        w.send(JSON.stringify({ action: "subscribe", trades: LIVE.subs.map(toAlpaca) }));
-        setLive("on"); renderMon(); renderGP();
-      } else if (m.T === "t") trade(fromAlpaca(m.S), m.p);
-      else if (m.T === "error") {
-        // 402 bad keys, 406 another connection open, 409 plan lacks this feed: retrying won't help.
-        if ([401, 402, 404, 406, 409].includes(m.code)) LIVE.creds = null;
-        setLive("error", `Alpaca ${m.code}: ${m.msg}${m.code === 406 ? " (another window is already streaming)" : ""}`);
+    for (const m of [].concat(JSON.parse(e.data))) {
+      const r = feed.handle(m, w);
+      if (r === "on") { up = true; if (LIVE.status !== "on") { setLive("on"); renderMon(); renderGP(); } }
+      else if (r && r.startsWith("error:")) {
+        const msg = r.slice(6);
+        if (feed !== COINBASE && fallBack(msg)) return;
+        if (/ 40[1246]| 409/.test(msg)) LIVE.want = false;  // bad key, plan, or connection limit: don't retry
+        setLive("error", msg);
       }
     }
   };
   w.onclose = () => {
-    if (!LIVE.creds || LIVE.creds !== creds) return;
+    if (!LIVE.want || LIVE.ws !== w) return;
+    if (!up && feed !== COINBASE && fallBack("could not connect")) return;
     setLive("connecting", "Connection dropped; retrying");
-    setTimeout(() => LIVE.creds === creds && connectLive(creds), 5000);
+    setTimeout(() => LIVE.want && LIVE.ws === w && connectLive(creds, true), 5000);
   };
 }
 
@@ -543,8 +586,8 @@ function track(s) {
   try { localStorage.setItem(TRACK_STORE, JSON.stringify(LIVE.subs)); } catch (e) {}
   const w = LIVE.ws;
   if (LIVE.status === "on" && w && w.readyState === 1) {
-    if (dropped) w.send(JSON.stringify({ action: "unsubscribe", trades: [toAlpaca(dropped)] }));
-    if (!had) w.send(JSON.stringify({ action: "subscribe", trades: [toAlpaca(s)] }));
+    if (dropped) w.send(JSON.stringify(FEED.unsub([FEED.wire(dropped)])));
+    if (!had) w.send(JSON.stringify(FEED.sub([FEED.wire(s)])));
   }
   if (dropped) for (const k of ["last", "open", "hi", "lo"]) delete LIVE[k][dropped];
 }
@@ -626,7 +669,12 @@ async function load() {
   renderStatus(); renderStrip(); renderMon(); renderGP(); renderPerf(); renderBook(); renderBltr(); renderSig(); renderRisk(); renderMth();
   for (const k of Object.keys(LIVE.last)) applyLive(k, false);
   if (Object.keys(LIVE.last).length) renderBook();
-  if (!LIVE.started) { LIVE.started = true; const c = savedCreds(); if (c) connectLive(c); }
+  if (!LIVE.started) {
+    LIVE.started = true;
+    const c = savedCreds();
+    if (c) connectLive(c);              // Alpaca (crypto falls back to Coinbase if it fails)
+    else if (CRYPTO) connectLive(null); // crypto with no key: Coinbase, live straight away
+  }
 }
 tick(); setInterval(tick, 1000);
 load(); setInterval(load, 5 * 60 * 1000);
