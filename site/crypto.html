@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="terminal.css?v=4b42f6939f">
+<link rel="stylesheet" href="terminal.css?v=f133633ae6">
 <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js" integrity="sha384-OK7vELvjHdhUFi31JYioPIcRHTROLdcDa6ZsNWgvgLaKj+9JqhU0Ad8g4wz3CXjA" crossorigin="anonymous"></script>
 </head>
 <body>
@@ -31,6 +31,7 @@
     <span>UTC <b id="utc">--:--:--</b></span>
     <span>Data <b id="asof">loading</b></span>
     <span id="mode"></span>
+    <span class="feed">Feed <span class="tabs" id="feedsel" role="group" aria-label="Live price source"><button type="button" data-f="coinbase">Coinbase</button><button type="button" data-f="alpaca">Alpaca</button></span></span>
     <button id="livebtn" class="badge live-off" type="button">Delayed · connect live</button>
   </div>
 </header>
@@ -59,7 +60,7 @@
 
 <dialog id="livedlg">
   <h3>Live prices</h3>
-  <p>Crypto prices stream live 24/7. With your Alpaca key saved they come from Alpaca, so they match your account; without a key, or if Alpaca fails, they come from Coinbase's public feed. Leave the fields empty and press Connect to use Coinbase. Every coin you open is live tracked; past 30, the one you opened longest ago drops off. Use the API key from an Alpaca <b>paper</b> account: it can read market data and can't touch real money.</p>
+  <p>Crypto prices stream live 24/7. Pick the source with the Feed switch next to this chip: Coinbase needs no key and works in any number of windows; Alpaca matches your account but uses your one Alpaca connection, so it can clash with the equities page. If Alpaca fails, the page falls back to Coinbase. Enter your key here to use Alpaca, or leave it empty and press Connect for Coinbase. Every coin you open is live tracked; past 30, the one you opened longest ago drops off. Use the API key from an Alpaca <b>paper</b> account: it can read market data and can't touch real money.</p>
   <form method="dialog">
     <label>API key ID <input id="lk" autocomplete="off" spellcheck="false"></label>
     <label>Secret key <input id="ls" type="password" autocomplete="off"></label>
@@ -82,6 +83,6 @@
 </dialog>
 
 <script>window.PAGE = { kind: "crypto", data: "crypto.json" };</script>
-<script src="terminal.js?v=aa93814a67"></script>
+<script src="terminal.js?v=1b3db206b9"></script>
 </body>
 </html>

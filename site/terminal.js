@@ -456,19 +456,24 @@ addEventListener("resize", () => {
 // saved, so prices match the account, and falls back to Coinbase's public feed (no key) when there is
 // no key or Alpaca fails. Keys stay in this browser.
 
-const alpacaFeed = (name, url, wire, unwire) => ({
+const alpacaFeed = (name, url, wire, unwire, quotes = false) => ({
   name, keyed: true, url, wire, unwire,
   hello: (c) => ({ action: "auth", key: c.key, secret: c.secret }),
-  sub: (syms) => ({ action: "subscribe", trades: syms }),
-  unsub: (syms) => ({ action: "unsubscribe", trades: syms }),
+  // Crypto trades on Alpaca can be minutes apart; bid/ask quotes update constantly, so use their midpoint too.
+  sub: (syms) => ({ action: "subscribe", trades: syms, ...(quotes ? { quotes: syms } : {}) }),
+  unsub: (syms) => ({ action: "unsubscribe", trades: syms, ...(quotes ? { quotes: syms } : {}) }),
   handle(m, w) {
     if (m.T === "success" && m.msg === "authenticated") { w.send(JSON.stringify(this.sub(LIVE.subs.map(this.wire)))); return "on"; }
     if (m.T === "t") trade(this.unwire(m.S), m.p);
+    if (m.T === "q" && m.bp > 0 && m.ap > 0) trade(this.unwire(m.S), (m.bp + m.ap) / 2);
     if (m.T === "error") return `error:Alpaca ${m.code}: ${m.msg}${m.code === 406 ? " (another window is already streaming)" : ""}`;
   },
 });
 const IEX = alpacaFeed("IEX", "wss://stream.data.alpaca.markets/v2/iex", (s) => s.replace("-", "."), (s) => s.replace(".", "-"));
-const ALPACA_CRYPTO = alpacaFeed("Alpaca", "wss://stream.data.alpaca.markets/v1beta3/crypto/us", (s) => s, (s) => s);
+const ALPACA_CRYPTO = alpacaFeed("Alpaca", "wss://stream.data.alpaca.markets/v1beta3/crypto/us", (s) => s, (s) => s, true);
+const PREF_STORE = "alphaforge.cryptofeed";  // "coinbase" | "alpaca"
+function feedPref() { try { return localStorage.getItem(PREF_STORE) === "alpaca" ? "alpaca" : "coinbase"; } catch (e) { return "coinbase"; } }
+function setFeedPref(v) { try { localStorage.setItem(PREF_STORE, v); } catch (e) {} }
 const COINBASE = {
   name: "Coinbase", keyed: false, url: "wss://ws-feed.exchange.coinbase.com",
   wire: (s) => s.replace("/", "-"), unwire: (s) => s.replace("-", "/"),
@@ -497,7 +502,29 @@ function setLive(status, note = "") {
     : FEED === COINBASE ? "Real-time prices from Coinbase's public feed. Click to stream from Alpaca with your key." : "");
   $("lerr").textContent = status === "error" ? note : "";
   if (status === "on") tick();
+  renderFeedSel();
 }
+
+function renderFeedSel() {
+  const el = $("feedsel");
+  if (!el) return;
+  const active = !LIVE.want ? "" : FEED === COINBASE ? "coinbase" : "alpaca";
+  el.querySelectorAll("button").forEach((b) => {
+    b.setAttribute("aria-pressed", b.dataset.f === active);
+    b.title = b.dataset.f === "coinbase" ? "Coinbase public feed: no key, any number of windows"
+      : "Alpaca crypto feed: needs your key, and uses your one Alpaca connection";
+  });
+}
+
+function chooseFeed(f) {
+  setFeedPref(f);
+  if (f === "coinbase") return connectLive(null);
+  const c = savedCreds() || LIVE.creds;
+  if (c && c.key) return connectLive(c);
+  openLiveDialog();  // need a key first
+}
+
+if ($("feedsel")) $("feedsel").querySelectorAll("button").forEach((b) => b.onclick = () => chooseFeed(b.dataset.f));
 
 function prevClose(s) {
   const q = D.quotes[s] || (D.strip[s] ?? null);
@@ -517,10 +544,11 @@ $("livedlg").addEventListener("close", () => {
   if (v !== "connect") return;
   const creds = { key: $("lk").value.trim(), secret: $("ls").value.trim() };
   if (!creds.key || !creds.secret) {
-    if (CRYPTO) return connectLive(null);  // no key: Coinbase
+    if (CRYPTO) { setFeedPref("coinbase"); return connectLive(null); }  // no key: Coinbase
     return setLive("error", "Enter both the key ID and the secret.");
   }
   try { $("lremember").checked ? localStorage.setItem(KEY_STORE, JSON.stringify(creds)) : localStorage.removeItem(KEY_STORE); } catch (e) {}
+  if (CRYPTO) setFeedPref("alpaca");
   connectLive(creds);
 });
 
@@ -672,8 +700,8 @@ async function load() {
   if (!LIVE.started) {
     LIVE.started = true;
     const c = savedCreds();
-    if (c) connectLive(c);              // Alpaca (crypto falls back to Coinbase if it fails)
-    else if (CRYPTO) connectLive(null); // crypto with no key: Coinbase, live straight away
+    if (CRYPTO) connectLive(feedPref() === "alpaca" && c ? c : null);  // Alpaca falls back to Coinbase if it fails
+    else if (c) connectLive(c);
   }
 }
 tick(); setInterval(tick, 1000);

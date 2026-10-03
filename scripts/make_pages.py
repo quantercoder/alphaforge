@@ -47,7 +47,7 @@ TEMPLATE = '''<!doctype html>
     <span>NY <b id="ny">--:--:--</b></span>
     <span>UTC <b id="utc">--:--:--</b></span>
     <span>Data <b id="asof">loading</b></span>
-    <span id="mode"></span>
+    <span id="mode"></span>{feed_sel}
     <button id="livebtn" class="badge live-off" type="button">Delayed · connect live</button>
   </div>
 </header>
@@ -114,7 +114,7 @@ PAGES = {
         foot="Equities sleeve. Delayed data from Yahoo Finance; live prices and account data from Alpaca.",
         live_text="Streams real-time stock trades from Alpaca's free IEX feed for up to 30 tickers, during market hours (9:30 to 16:00 New York). Every ticker you open is live tracked; past 30, the one you opened longest ago drops off.",
         help_tickers="<code>NVDA</code> or <code>nvidia</code>: chart it and live track it",
-        live_list=" · <code>LIVE LIST</code> tracked tickers"),
+        live_list=" · <code>LIVE LIST</code> tracked tickers", feed_sel=""),
     "crypto.html": dict(
         title="AlphaForge Crypto", kind="crypto", data="crypto.json", eq_cur="", cr_cur=' aria-current="page"',
         desc="AlphaForge crypto: trend-following crypto sleeve with live paper book, signals, risk and research.",
@@ -122,9 +122,11 @@ PAGES = {
         strip_label="Coins", book_title="Crypto book",
         sig_note="time-series trend",
         foot="Crypto sleeve, kept separate from the stock strategy. Daily data from Yahoo Finance; live prices from Alpaca, or Coinbase as the backup; account data from Alpaca.",
-        live_text="Crypto prices stream live 24/7. With your Alpaca key saved they come from Alpaca, so they match your account; without a key, or if Alpaca fails, they come from Coinbase's public feed. Leave the fields empty and press Connect to use Coinbase. Every coin you open is live tracked; past 30, the one you opened longest ago drops off.",
+        live_text="Crypto prices stream live 24/7. Pick the source with the Feed switch next to this chip: Coinbase needs no key and works in any number of windows; Alpaca matches your account but uses your one Alpaca connection, so it can clash with the equities page. If Alpaca fails, the page falls back to Coinbase. Enter your key here to use Alpaca, or leave it empty and press Connect for Coinbase. Every coin you open is live tracked; past 30, the one you opened longest ago drops off.",
         help_tickers="<code>BTC</code> or <code>solana</code>: chart it and live track it",
-        live_list=" · <code>LIVE LIST</code> tracked coins"),
+        live_list=" · <code>LIVE LIST</code> tracked coins",
+        feed_sel='\n    <span class="feed">Feed <span class="tabs" id="feedsel" role="group" aria-label="Live price source">'
+                 '<button type="button" data-f="coinbase">Coinbase</button><button type="button" data-f="alpaca">Alpaca</button></span></span>'),
 }
 
 for fname, v in PAGES.items():

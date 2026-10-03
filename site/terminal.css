@@ -54,6 +54,8 @@ a { color: var(--amber); }
 .badge.paper { color: var(--blue); } .badge.real { color: var(--down); } .badge.halt { color: var(--down); background: #2a0805; }
 .open { color: var(--up); } .closed { color: var(--dim); }
 #livebtn { cursor: pointer; font: inherit; }
+.feed { display: inline-flex; gap: 6px; align-items: center; }
+.feed .tabs button { border: 1px solid var(--rule); padding: 0 6px; }
 .live-off { color: var(--dim); } .live-connecting { color: var(--cmd); } .live-on { color: var(--up); } .live-error { color: var(--down); }
 
 .strip { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); border-bottom: 1px solid var(--rule); }
