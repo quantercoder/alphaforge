@@ -16,5 +16,5 @@ a = p.parse_args()
 prices, bench = synthetic_prices() if a.synthetic else load_prices(DEFAULT_UNIVERSE, a.start)
 res = run_backtest(prices, Config(mode=a.mode, rebalance=a.rebalance, target_vol=a.target_vol), bench)
 for k, v in metrics.summary(res).items():
-    print(f"{k:<18}{v:>10.3f}" if abs(v) >= 1 or k in {"Sharpe", "Sortino", "Calmar", "Beta", "Avg Gross Lev."}
+    print(f"{k:<18}{v:>10.3f}" if abs(v) >= 1 or k in {"Sharpe", "Sharpe SE", "Sortino", "Calmar", "Beta", "Avg Gross Lev."}
           else f"{k:<18}{v:>10.2%}")

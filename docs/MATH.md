@@ -19,6 +19,7 @@ This document specifies every quantity the engine computes, in the order the cod
 13. [Live execution](#13-live-execution)
 14. [Statistical caveats](#14-statistical-caveats)
 15. [Parameter reference](#15-parameter-reference)
+16. [The crypto sleeve](#16-the-crypto-sleeve)
 
 ---
 
@@ -80,7 +81,9 @@ f^{\text{LV}}_{i,t} = -\hat\sigma_{i,t}, \qquad
 \hat\sigma_{i,t} = \sqrt{\frac{1}{62}\sum_{s=0}^{62}\left(\ell_{i,t-s} - \bar\ell_{i,t}\right)^2}.
 ```
 
-This is the 63-day sample standard deviation of daily log returns, with $n-1$ in the denominator. Low-risk stocks have historically earned higher risk-adjusted returns than CAPM predicts (Frazzini & Pedersen, 2014, "Betting Against Beta").
+This is the 63-day sample standard deviation of daily log returns, with $n-1$ in the denominator. The evidence for a total-volatility anomaly is Ang, Hodrick, Xing & Zhang (2006), who find that stocks with high recent volatility earn low subsequent returns, and Baker, Bradley & Wurgler (2011), who tie it to benchmark-constrained investors. (Frazzini & Pedersen's "Betting Against Beta" is about beta, a related but different measure.)
+
+**In this universe the factor works backwards.** Over 2015 to 2026 its rank IC against the next 63 days' returns is $-0.14$ ($t \approx -4.7$; see [RESEARCH.md](RESEARCH.md)): the most volatile mega caps (mostly technology) did best. The anomaly is documented across broad universes; 30 survivors of a tech-led decade are not one.
 
 ### 3.4 Trend quality (`quality_trend`)
 
@@ -106,7 +109,7 @@ s_t = \sqrt{\frac{1}{N_t - 1}\sum_{j \in \mathcal{U}_t} (f_{j,t} - \mu_t)^2}.
 
 Three properties matter:
 
-- **Cross-sectional, not time-series.** Each day is standardized against itself, so only *relative* rank enters. A market-wide crash shifts every $f_{i,t}$ together and leaves $z$ unchanged. This is why a dollar-neutral book built from $z$ has little market exposure by construction.
+- **Cross-sectional, not time-series.** Each day is standardized against itself, so only *relative* rank enters. A shock that moves every $f_{i,t}$ by the same amount (or scales them all by the same positive factor) leaves $z$ unchanged. A real crash rarely does that: high-beta names fall further, so ranks still move. This is why a dollar-neutral book built from $z$ has little market exposure by construction.
 - **Winsorization at ±3.** One extreme name (a biotech after an FDA decision) would otherwise dominate the weights through the linear mapping in §6. Clipping bounds any single name's influence. After clipping, $z$ is no longer exactly mean 0 and variance 1; §5 re-standardizes.
 - **Degenerate days.** If $s_t = 0$ (all scores equal), $z$ is undefined (NaN) and nobody trades on that factor that day.
 
@@ -179,13 +182,13 @@ On each rebalance date $t$, with lookback $L = 63$ (`Config.cov_lookback`), let 
 \mathbf{S} = \frac{1}{L-1}\sum_{s=t-L+1}^{t} (\mathbf r_s - \bar{\mathbf r})(\mathbf r_s - \bar{\mathbf r})^\top .
 ```
 
-With $N = 30$ and $L = 63$, $\mathbf{S}$ has $N(N+1)/2 = 465$ free parameters estimated from $63 	imes 30 = 1890$ numbers. Its smallest eigenvalues are biased toward zero and its largest away from it (Marchenko–Pastur). Portfolios built on $\mathbf S$ inherit that error, so the engine shrinks it toward its diagonal:
+With $N = 30$ and $L = 63$, $\mathbf{S}$ has $N(N+1)/2 = 465$ free parameters estimated from $63 \times 30 = 1890$ numbers. Its smallest eigenvalues are biased toward zero and its largest away from it (Marchenko–Pastur). Portfolios built on $\mathbf S$ inherit that error, so the engine shrinks it toward its diagonal:
 
 ```math
 \hat{\mathbf\Sigma} = (1-\delta)\,\mathbf S + \delta\,\operatorname{diag}(\mathbf S), \qquad \delta = 0.3 .
 ```
 
-This is the Ledoit–Wolf (2004) form with a diagonal (zero-correlation) target and a fixed intensity in place of the optimal $\delta^\star$. It keeps every variance and multiplies every covariance by $1 - \delta$. Since $\hat{\mathbf\Sigma}$ is a convex combination of two positive semi-definite matrices, it is positive semi-definite, and positive definite whenever every asset has non-zero variance.
+This has the form of Ledoit–Wolf (2004) shrinkage toward a diagonal (zero-correlation) target, but it is **not** the Ledoit–Wolf estimator: Ledoit and Wolf estimate the intensity $\delta^\star$ from the data to minimize expected error, while this uses a fixed $\delta = 0.3$. It keeps every variance and multiplies every covariance by $1 - \delta$. Since $\hat{\mathbf\Sigma}$ is a convex combination of two positive semi-definite matrices, it is positive semi-definite, and positive definite whenever every asset has non-zero variance.
 
 **Ceiling.** Pairwise correlations are pulled toward zero, so the diversification in a long-only book is somewhat overstated, and ex-ante volatility *underestimates* realized volatility. In the default backtest, a 12% target delivers about 15% realized. A factor risk model (§14) is the upgrade.
 
@@ -214,7 +217,11 @@ Why target vol at all: realized volatility clusters (GARCH effects), so scaling 
 
 ### 9.3 Hard per-name limit
 
-Finally, $w_i \leftarrow \operatorname{clip}(w_i, -m, m)$. This is a NAV-relative limit that holds after leverage. It can only reduce exposure, so forecast vol is at most $\sigma^\star$ afterwards, and dollar-neutrality may break by the clipped amount.
+Finally, $w_i \leftarrow \operatorname{clip}(w_i, -m, m)$. This is a NAV-relative limit that holds after leverage. It can only shrink positions. That lowers forecast volatility when every covariance in the book is non-negative, which holds for the long-only book in practice. In a long/short book, clipping one side can *raise* volatility by removing a hedge, and it breaks dollar-neutrality by the clipped amount.
+
+### 9.3a What the vol target actually does in the live book
+
+With the live settings (long-only, $m = 10\%$, top 30% of 30 names, so 9 names), the rank weights of §6.2 run from 2.2% to 20%. The cap binds on most names, and $9 \times 10\% = 90\% < 100\%$, so water-filling can't reach full gross: every name ends at 10%. **The live book is equal-weight across the top 9 with about 10% cash, by construction**, and the rank weighting has no effect. After that, the vol target can only scale *down*: scaling up would be undone by the hard clip at $m$. So in this configuration it works as a risk brake in volatile periods, not as a target. Raising $m$ (for example to 15%) or holding more names would let both mechanisms work; that is a strategy change and is tested in [RESEARCH.md §3](RESEARCH.md#3-walk-forward).
 
 ### 9.4 The full map
 
@@ -251,7 +258,15 @@ Between rebalances the book holds shares, not weights. If NAV-relative weights $
 w_{i,t}^{-} = \frac{w_{i,t-1}\,(1 + r_{i,t})}{1 + g_t}.
 ```
 
-*Derivation.* Position $i$'s value goes from $w_{i,t-1}V$ to $w_{i,t-1}V(1+r_{i,t})$, and NAV goes from $V$ to $V(1+g_t)$. Divide. Short positions work the same way ($w<0$). Cash, the residual $1 - \mathbf 1^\top\mathbf w$, earns zero; there is no financing rate.
+*Derivation.* Position $i$'s value goes from $w_{i,t-1}V$ to $w_{i,t-1}V(1+r_{i,t})$, and NAV goes from $V$ to $V(1+g_t)$. Divide. Short positions work the same way ($w<0$).
+
+**Cash earns the T-bill rate.** The residual $1 - \mathbf 1^\top\mathbf w_{t-1}$ earns the daily risk-free return $r^f_t = y_{t-1}/(100 \cdot 252)$, where $y$ is the 13-week T-bill yield in percent (Yahoo `^IRX`), lagged one day so it is known before it is earned:
+
+```math
+g_t = \mathbf w_{t-1}^\top \mathbf r_t + \left(1 - \mathbf 1^\top \mathbf w_{t-1}\right) r^f_t .
+```
+
+In a dollar-neutral book the short proceeds plus capital earn roughly $r^f$ on the full NAV, which this formula gives since $\mathbf 1^\top\mathbf w = 0$. There is no borrow fee. Note the live Alpaca account pays no interest on cash, so live results lag this assumption by about $r^f$ times the cash share.
 
 ### 11.2 Turnover and costs
 
@@ -286,28 +301,53 @@ Implemented in `metrics.py`, computed from the first trade day onward. $\bar r$ 
 |---|---|---|
 | CAGR | $(V_n/V_0)^{A/n} - 1$ | geometric |
 | Ann. vol | $s_r\sqrt{A}$ | assumes no autocorrelation |
-| Sharpe | $\dfrac{\bar r}{s_r}\sqrt A$ | excess over **zero**, not T-bills; see below |
-| Sortino | $\dfrac{\bar r}{\mathrm{DD}}\sqrt A$, with $\mathrm{DD} = \sqrt{\tfrac1n\sum_t \min(r_t,0)^2}$ | downside deviation around a 0 target, over all days |
+| Sharpe | $\dfrac{\bar x}{s_x}\sqrt A$ with $x_t = r_t - r^f_t$ | excess of T-bills |
+| Sharpe SE | $\sqrt{(1 + \widehat{SR}^2/2)/Y}$ | Lo (2002), $Y$ years |
+| Sortino | $\dfrac{\bar x}{\mathrm{DD}}\sqrt A$, with $\mathrm{DD} = \sqrt{\tfrac1n\sum_t \min(x_t,0)^2}$ | downside deviation of excess returns, over all days |
 | Drawdown | $D_t = V_t / \max_{s\le t} V_s - 1$ | |
 | Max drawdown | $\min_t D_t$ | |
 | Calmar | $\text{CAGR}/\lvert\min_t D_t\rvert$ | |
 | VaR$_{95}$ | $-Q_{0.05}(r)$ | historical, 1-day, positive number = loss |
 | CVaR$_{95}$ | $-\mathbb E[\,r \mid r \le Q_{0.05}(r)\,]$ | expected shortfall; always $\ge$ VaR |
 | Beta | $\hat\beta = \dfrac{\widehat{\operatorname{Cov}}(r, r^B)}{\widehat{\operatorname{Var}}(r^B)}$ | OLS slope on the benchmark |
-| Alpha (ann.) | $A\left(\bar r - \hat\beta\,\bar r^B\right)$ | Jensen's alpha with $r_f = 0$ |
+| Alpha (ann.) | $A\left(\bar x - \hat\beta\,\bar x^B\right)$ | Jensen's alpha on excess returns; $\hat\beta$ also on excess returns |
 | Hit rate | share of non-zero days with $r_t > 0$ | |
 | Ann. turnover | $\frac{A}{n}\sum_t \text{TO}_t$ | a value of $k$ means trading $k\times$ NAV a year |
 | Cost drag | $\frac{A}{n}\sum_t c_t$ | return lost to costs per year |
 
-**Sharpe and the risk-free rate.** The engine reports $\bar r/s_r$ without subtracting $r_f$. A dollar-neutral book earns roughly $r_f$ on its short-sale proceeds in practice, so $\bar r$ is already approximately an excess return. A long-only book's Sharpe ratio is overstated by about $r_f/\sigma_p$; with 4% rates and 15% vol, that's roughly 0.27.
+**Annualization.** $A = 252$ for equities and $A = 365$ for crypto, which trades every day. The crypto sleeve's statistics use no risk-free rate.
 
 **Annualizing by $\sqrt{A}$** assumes independent daily returns. With first-order autocorrelation $\rho$, the true annual volatility is about $\sqrt{A\,(1+\rho)/(1-\rho)}\;s_r$ (Lo, 2002).
 
-**Ex-ante risk on the terminal** (`terminal.build`): book volatility $\sqrt{A\,\mathbf w^\top\mathbf S\,\mathbf w}$ on the 63-day *unshrunk* covariance, a parametric 1-day VaR of $1.645\cdot\hat\sigma_p/\sqrt{A}\cdot V$ under normal returns, book beta $\sum_i w_i\hat\beta_i$ from 252-day betas, and factor exposure $E_k = \sum_i w_i z^{(k)}_i$.
+**Risk on the terminal** (`terminal.risk_block`), for a sleeve with NAV $V$ and NAV-relative weights $\mathbf w$:
+
+| Quantity | Definition |
+|---|---|
+| Forecast vol | $\sqrt{A\,\mathbf w^\top\hat{\mathbf\Sigma}\,\mathbf w}$ with the model's own shrunk covariance (§8) |
+| Realized vol | standard deviation of $\mathbf r_s^\top \mathbf w$ over the same lookback, times $\sqrt A$: what today's book *would have* done |
+| VaR 95% (normal) | $1.645\,\sqrt{\mathbf w^\top\hat{\mathbf\Sigma}\,\mathbf w}\;V$ |
+| VaR 95% (history) | $-Q_{0.05}\big(\{\mathbf r_s^\top\mathbf w\}_{s \in \text{last year}}\big)\,V$, historical simulation of today's book |
+| Beta | $\sum_i w_i \hat\beta_i$, one-year betas to SPY (equities) or Bitcoin (crypto) |
+| Stress | $\beta \cdot \text{shock} \cdot V$ for SPX $-10\%$ or BTC $-20\%$ |
+| Share of risk | $\dfrac{w_i (\hat{\mathbf\Sigma}\mathbf w)_i}{\mathbf w^\top\hat{\mathbf\Sigma}\mathbf w}$, which sums to 1 (Euler decomposition) |
+| Sector exposure | $\sum_{i \in s} w_i$ per sector |
+| Factor exposure | $E_k = \sum_i w_i z^{(k)}_i$ |
+
+Forecast below realized means the covariance window was calmer than the year; the gap is worth watching.
 
 ## 13. Live execution
 
 `live.py` turns target weights into orders once a day after the close. Signal generation calls the same `targets_at` as the backtest.
+
+### 13.0 Sleeves
+
+The account is split into an **equity sleeve** (this strategy) and a **crypto sleeve** (§16). **The equity strategy manages only the equity sleeve**: it sees only `us_equity` positions, never sells a coin, and sizes from the equity sleeve's NAV, not the whole account. With account equity $E$, the crypto sleeve's NAV $V^c$ and the equity sleeve's NAV $V^e$ are
+
+```math
+V^c = M^c + C^c, \qquad C^c = B - M^c_0 - \sum_{f \in \mathcal F^c} q_f P_f, \qquad V^e = E - V^c,
+```
+
+where $M^c$ is the crypto market value, $B$ the crypto budget, $M^c_0$ the crypto market value when the sleeve started, and the sum runs over every crypto fill since then (signed quantity times fill price, read back from the broker). So the crypto sleeve starts with $B$ and then moves only with its own P&L; fees paid in coin show up as a smaller $M^c$. With the crypto sleeve off, $V^e = E - M^c$, so coins held by hand still never inflate stock sizing. Each sleeve has its own high-water mark, drawdown halt and kill file (`state/KILL`, `state/KILL_CRYPTO`); a halt flattens only that sleeve.
 
 ### 13.1 Signal calendar
 
@@ -315,11 +355,13 @@ $\tau$ is a signal day if it is the last trading day of its month (approximated 
 
 ### 13.2 Order sizing
 
-With equity $V$, price $P_i$, current shares $q_i$ and target weight $w^\star_i$:
+With sleeve NAV $V$, cash buffer $b$ (0 for equities, 2% for crypto), price $P_i$, current units $q_i$ and target weight $w^\star_i$:
 
 ```math
-q^\star_i = \operatorname{trunc}\!\left(\frac{w_i^\star V}{P_i}\right), \qquad \Delta_i = q_i^\star - q_i .
+q^\star_i = \operatorname{trunc}\!\left(\frac{w_i^\star (1-b) V}{P_i}\right), \qquad \Delta_i = q_i^\star - q_i ,
 ```
+
+where trunc is to whole shares for equities and to $10^{-6}$ for crypto. The buffer exists because a crypto purchase needs settled cash: sizing to exactly $V$ would leave fees with nowhere to come from, and the broker would reject the last buy.
 
 Truncation toward zero means the book never exceeds its target in absolute terms. The rounding error per name is under one share, so the weight error is $\lvert w_i - w^\star_i\rvert < P_i/V$; for a \$600 stock in a \$100k account that is 0.6%.
 
@@ -333,7 +375,9 @@ Filters, applied in this order:
 ### 13.3 Fills
 
 - **Simulator** (`SimBroker`): the order queued on signal day $\tau$ fills at the close of the next run day $\tau + 1$, at $P(1 \pm \kappa_{\text{slip}})$ plus commission $\kappa_{\text{comm}}\lvert qP\rvert$. That reproduces the backtest's timing (§10) exactly.
-- **Alpaca:** market, time-in-force *day*, submitted after the close, so they fill at the next open. This is about half a day earlier than the backtest assumes.
+- **Alpaca equities:** market, time-in-force *day*, submitted after the close, so they fill at the next open. This is about half a day earlier than the backtest assumes. Each fill is compared with the price at signal time and the average slippage is shown on the blotter, next to the cost the backtest assumes.
+- **Alpaca crypto:** market, time-in-force *gtc*, fractional quantities, filled immediately (24/7).
+- **Idempotency.** Every order carries a deterministic client id, `af-{sleeve}-{date}-{rb|sw|kl}-{symbol}-{n}`. A retried run produces the same ids, the broker rejects the duplicates, and nothing is sent twice. Before a rebalance the job cancels only *its own* open orders from earlier days in that sleeve's asset class; orders placed by hand are never touched.
 
 ### 13.4 Two-week swap of the worst performers
 
@@ -355,7 +399,7 @@ The high-water mark is $H_t = \max_{s\le t} V_s$. The job flattens the book and 
 \frac{V_t}{H_t} - 1 < -d_{\max},
 ```
 
-with $d_{\max}$ = `max_drawdown_halt`. Trading resumes only after a person deletes that file. The job also halts on the `ALPHAFORGE_KILL=1` environment variable, and it refuses to trade on prices older than `max_data_age_days`. Real-money trading needs both `"live_money": true` in `live.json` **and** `ALPHAFORGE_CONFIRM_LIVE=yes` in the environment.
+with $d_{\max}$ = `max_drawdown_halt` (20% equities, 50% crypto, set beyond each backtest's worst drawdown so normal swings don't trip it). Trading resumes only after a person deletes that file. The terminal shows how much of the distance to the halt has been used. Halts, rejected orders and broker cancellations are written to `alerts.txt`, and the GitHub job fails on them, which emails the repository owner. The job also halts on `ALPHAFORGE_KILL=1` (all sleeves) or `ALPHAFORGE_KILL=equity` / `crypto` (one sleeve), and it refuses to trade on prices older than `max_data_age_days`. Real-money trading needs both `"live_money": true` in `live.json` **and** `ALPHAFORGE_CONFIRM_LIVE=yes` in the environment.
 
 ## 14. Statistical caveats
 
@@ -366,6 +410,8 @@ with $d_{\max}$ = `max_drawdown_halt`. Trading resumes only after a person delet
 **Survivorship bias.** `DEFAULT_UNIVERSE` is a list of today's mega caps. Run back to 2014, it selects on the outcome: these firms are large *because* they went up. Long-only results are inflated by an amount that can't be measured without point-in-time constituents. Cross-sectional (long/short) results are less exposed, since everyone in the universe shares the bias, but they still are exposed.
 
 **Regime dependence.** Momentum suffers sharp crashes in rebounds after bear markets (Daniel & Moskowitz, 2016: 2009 is the textbook case). Twelve years of data contain only a handful of such episodes.
+
+**What the research found** ([RESEARCH.md](RESEARCH.md)). Momentum is the only factor with a positive rank IC here ($t \approx 2.2$ at 63 days). Reversal has none and causes most of the turnover; low volatility is significantly negative. Walk-forward, out of sample, the Sharpe ratio is about 0.96. No setting in the 20-setting grid beats an equal-weight portfolio of the same 30 names on raw returns; adjusted for its lower beta, the live strategy adds about 2% a year, which is not statistically distinguishable from zero.
 
 **Upgrade path,** in order of value: point-in-time universe → walk-forward validation → factor risk model with optimizer ($\max_{\mathbf w}\,\boldsymbol\alpha^\top\mathbf w - \tfrac{\gamma}{2}\mathbf w^\top\mathbf\Sigma\mathbf w - \tau\lVert\mathbf w - \mathbf w_0\rVert_1$ subject to sector and beta neutrality) → square-root impact costs.
 
@@ -388,17 +434,47 @@ with $d_{\max}$ = `max_drawdown_halt`. Trading resumes only after a person delet
 | Execution lag $\ell$ | 1 day | `Config.execution_lag` |
 | Costs | 2 + 5 bps | `Config.cost_bps`, `slippage_bps` |
 | Rebalance | month-end | `Config.rebalance` |
-| Drawdown halt $d_{\max}$ | 20% | `live.json` |
+| Drawdown halt $d_{\max}$ | 20% equities, 50% crypto | `live.json` |
+| Risk-free rate | 13-week T-bill (`^IRX`), lagged a day | `data.risk_free` |
+| Crypto budget $B$ | \$10,000 | `live.json` → `crypto.budget` |
+
+## 16. The crypto sleeve
+
+A separate strategy with its own budget, NAV and kill switch (§13.0), shown on its own terminal page.
+
+**Signal: time-series trend.** For each coin, with log price $p$,
+
+```math
+\tau_{i,t} = \frac{1}{3}\sum_{n \in \{20,\,60,\,120\}} \operatorname{sgn}\!\left(p_{i,t} - p_{i,t-n}\right) \in \{-1, -\tfrac13, \tfrac13, 1\}.
+```
+
+Unlike §4 this is *not* cross-sectional: each coin is judged against its own past, so every coin can be in a downtrend at once, and then the sleeve holds cash. Trend persistence at these horizons is documented across asset classes (Hurst, Ooi & Pedersen, 2017) and in crypto specifically (Liu & Tsyvinski, 2021).
+
+**Weights.** Long only (spot crypto can't be shorted on Alpaca), in proportion to positive trend and inverse volatility:
+
+```math
+u_i = \frac{\max(\tau_i, 0)/\hat\sigma_i}{\sum_j \max(\tau_j, 0)/\hat\sigma_j}, \qquad \hat\sigma_i = \text{60-day std of daily returns},
+```
+
+then the same pipeline as equities: cap at 35% per coin (§7), scale to a 25% annual vol target on the shrunk 60-day covariance (§8–9), gross capped at 100%, hard clip at 35%.
+
+**Schedule and costs.** Rebalanced every 7 days on complete daily (UTC) bars; today's still-forming bar is dropped. Costs are 25 bps (Alpaca's taker fee) plus 10 bps slippage. Annualization uses 365 days.
+
+**Evidence** ([RESEARCH.md §6](RESEARCH.md#6-crypto-trend-sleeve)). From 2019, the trend sleeve had a Sharpe ratio of about 1.0 against 0.9 for holding Bitcoin, within one standard error ($\approx 0.45$), and a maximum drawdown near $-48\%$ against $-77\%$. Its case is drawdown control, not a higher Sharpe ratio. The 8 coins are today's survivors, so the backtest is biased upward like the equity one.
 
 ## References
 
+- Ang, A., Hodrick, R., Xing, Y. & Zhang, X. (2006). The cross-section of volatility and expected returns. *Journal of Finance* 61(1).
+- Baker, M., Bradley, B. & Wurgler, J. (2011). Benchmarks as limits to arbitrage: understanding the low-volatility anomaly. *Financial Analysts Journal* 67(1).
 - Bailey, D. & López de Prado, M. (2014). The deflated Sharpe ratio. *Journal of Portfolio Management* 40(5).
 - Da, Z., Gurun, U. & Warachka, M. (2014). Frog in the pan: continuous information and momentum. *Review of Financial Studies* 27(7).
 - Daniel, K. & Moskowitz, T. (2016). Momentum crashes. *Journal of Financial Economics* 122(2).
 - DeMiguel, V., Garlappi, L. & Uppal, R. (2009). Optimal versus naive diversification. *Review of Financial Studies* 22(5).
 - Frazzini, A. & Pedersen, L. (2014). Betting against beta. *Journal of Financial Economics* 111(1).
+- Hurst, B., Ooi, Y. H. & Pedersen, L. (2017). A century of evidence on trend-following investing. *Journal of Portfolio Management* 44(1).
 - Jegadeesh, N. & Titman, S. (1993). Returns to buying winners and selling losers. *Journal of Finance* 48(1).
 - Ledoit, O. & Wolf, M. (2004). Honey, I shrunk the sample covariance matrix. *Journal of Portfolio Management* 30(4).
 - Lehmann, B. (1990). Fads, martingales, and market efficiency. *Quarterly Journal of Economics* 105(1).
 - Lo, A. (2002). The statistics of Sharpe ratios. *Financial Analysts Journal* 58(4).
+- Liu, Y. & Tsyvinski, A. (2021). Risks and returns of cryptocurrency. *Review of Financial Studies* 34(6).
 - Moreira, A. & Muir, T. (2017). Volatility-managed portfolios. *Journal of Finance* 72(4).

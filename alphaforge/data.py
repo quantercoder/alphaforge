@@ -79,3 +79,12 @@ def synthetic_prices(n_assets=30, n_days=2520, seed=7):
                           columns=[f"SYN{i:02d}" for i in range(n_assets)])
     bench = pd.Series(100 * np.exp(np.cumsum(mkt)), index=idx, name="BENCH")
     return prices, bench
+
+
+def risk_free(raw, ann=252, symbol="^IRX"):
+    """Daily risk-free return from the 13-week T-bill yield (percent), lagged one day so it is known
+    before it is earned. Zero where the series is unavailable."""
+    if symbol not in raw["Close"]:
+        return None
+    y = raw["Close"][symbol].ffill()
+    return (y.shift(1) / 100 / ann).fillna(0)

@@ -54,3 +54,22 @@ def combine(scores, weights):
     # Names with no factor history at all stay NaN so they are not traded.
     valid = sum(scores[k].notna().astype(int) for k, w in weights.items() if w) > 0
     return cs_zscore(blend.where(valid))
+
+
+def trend_score(prices, lookbacks=(20, 60, 120)):
+    """Time-series trend: average sign of the log return over several lookbacks, in [-1, 1].
+
+    Not cross-sectional: each asset is judged against its own past, so every asset can be
+    in a downtrend at once (and the book goes to cash).
+    """
+    lp = np.log(prices)
+    return sum(np.sign(lp - lp.shift(n)) for n in lookbacks) / len(lookbacks)
+
+
+def alpha_panel(prices, cfg):
+    """The model's score panel for a backtest.Config: factor blend, trend, or flat (equal weight)."""
+    if cfg.model == "trend":
+        return trend_score(prices)
+    if cfg.model == "equal":
+        return prices.notna().astype(float).where(prices.notna())
+    return combine(factor_scores(prices), cfg.factor_weights)

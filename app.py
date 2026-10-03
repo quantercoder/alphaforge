@@ -107,19 +107,19 @@ with tab_perf:
     fig = go.Figure([line(eq.index, eq, "Strategy", BLUE, ".3f"),
                      line(beq.index, beq, "Benchmark", ORANGE, ".3f")])
     st.plotly_chart(style(fig, 380, log=True).update_layout(title="Growth of $1 (log)"),
-                    use_container_width=True)
+                    width="stretch")
     c1, c2 = st.columns(2)
     dd = metrics.drawdown(r)
     fig = go.Figure(go.Scatter(x=dd.index, y=dd, name="Drawdown", fill="tozeroy", mode="lines",
                                line=dict(color=RED, width=2), fillcolor="rgba(230,103,103,0.18)",
                                hovertemplate="%{y:.2%}<extra>Drawdown</extra>"))
     c1.plotly_chart(style(fig, yfmt=".0%").update_layout(title="Drawdown", showlegend=False),
-                    use_container_width=True)
+                    width="stretch")
     rs = metrics.rolling_sharpe(r)
     fig = go.Figure(line(rs.index, rs, "6m rolling Sharpe", BLUE, ".2f"))
     fig.add_hline(y=0, line_color=AXIS, line_width=1)
     c2.plotly_chart(style(fig).update_layout(title="Rolling Sharpe (126d)", showlegend=False),
-                    use_container_width=True)
+                    width="stretch")
 
 with tab_ret:
     mt = metrics.monthly_table(r)
@@ -132,7 +132,7 @@ with tab_ret:
         hovertemplate="%{y} %{x}: %{z:.2%}<extra></extra>", colorbar=dict(tickformat=".0%")))
     fig.update_yaxes(autorange="reversed")
     st.plotly_chart(style(fig, 40 + 28 * len(z)).update_layout(title="Monthly returns", hovermode="closest"),
-                    use_container_width=True)
+                    width="stretch")
     # Blue<->red diverging uses red for losses; values carry sign in text so color is not the only cue.
     c1, c2 = st.columns(2)
     var, cvar = metrics.var_cvar(r)
@@ -141,15 +141,15 @@ with tab_ret:
     fig.add_vline(x=-var, line_color=INK2, line_dash="dash", annotation_text=f"VaR95 {var:.2%}",
                   annotation_font_color=INK2)
     c1.plotly_chart(style(fig).update_xaxes(tickformat=".1%").update_layout(
-        title="Daily return distribution", hovermode="closest", showlegend=False), use_container_width=True)
+        title="Daily return distribution", hovermode="closest", showlegend=False), width="stretch")
     yr = mt["Year"]
     fig = go.Figure(go.Bar(x=yr.index.astype(str), y=yr, marker_color=[BLUE if v >= 0 else RED for v in yr],
                            marker_cornerradius=4, text=[f"{v:+.1%}" for v in yr], textposition="outside",
                            hovertemplate="%{x}: %{y:.2%}<extra></extra>"))
     c2.plotly_chart(style(fig, yfmt=".0%").update_layout(title="Calendar-year returns", showlegend=False),
-                    use_container_width=True)
+                    width="stretch")
     with st.expander("Monthly returns table"):
-        st.dataframe(mt.style.format("{:.2%}", na_rep=""), use_container_width=True)
+        st.dataframe(mt.style.format("{:.2%}", na_rep=""), width="stretch")
 
 with tab_pos:
     w = res.weights.iloc[-1].sort_values()
@@ -160,17 +160,17 @@ with tab_pos:
                            hovertemplate="%{y}: %{x:.2%}<extra></extra>"))
     c1.plotly_chart(style(fig, max(320, 22 * len(w))).update_xaxes(tickformat=".0%").update_layout(
         title=f"Current book ({res.weights.index[-1]:%Y-%m-%d}) · blue long, red short",
-        hovermode="closest", showlegend=False), use_container_width=True)
+        hovermode="closest", showlegend=False), width="stretch")
     wl = res.weights.loc[t0:]
     gross, net = wl.abs().sum(axis=1), wl.sum(axis=1)
     fig = go.Figure([line(gross.index, gross, "Gross", BLUE), line(net.index, net, "Net", ORANGE)])
-    c2.plotly_chart(style(fig, yfmt=".0%").update_layout(title="Exposure"), use_container_width=True)
+    c2.plotly_chart(style(fig, yfmt=".0%").update_layout(title="Exposure"), width="stretch")
     to = res.turnover.loc[t0:]
     to = to[to > 0]
     fig = go.Figure(go.Bar(x=to.index, y=to, marker_color=BLUE, hovertemplate="%{x|%Y-%m-%d}: %{y:.1%}<extra></extra>"))
     c2.plotly_chart(style(fig, 240, yfmt=".0%").update_layout(title="Turnover per rebalance",
                                                                hovermode="closest", showlegend=False),
-                    use_container_width=True)
+                    width="stretch")
 
 with tab_sig:
     last = res.alpha.iloc[-1].dropna().sort_values(ascending=False)
@@ -179,7 +179,7 @@ with tab_sig:
     st.markdown("Latest cross-sectional z-scores (winsorized ±3). Alpha is the weighted blend, re-standardized.")
     st.dataframe(tbl.style.format("{:+.2f}", subset=list(FACTORS) + ["alpha"])
                  .format("{:+.2%}", subset=["weight"]),
-                 use_container_width=True, height=min(800, 38 * (len(tbl) + 1)))
+                 width="stretch", height=min(800, 38 * (len(tbl) + 1)))
 
 with tab_stats:
     fmt_pct = {"CAGR", "Ann. Vol", "Max Drawdown", "VaR 95% (1d)", "CVaR 95% (1d)", "Hit Rate",
@@ -189,7 +189,7 @@ with tab_stats:
           "Sharpe": metrics.sharpe(b), "Max Drawdown": metrics.drawdown(b).min()}
     st.dataframe(pd.DataFrame(rows, columns=["Metric", "Strategy"]).assign(
         Benchmark=[f"{bs[k_]:.2%}" if k_ in fmt_pct and k_ in bs else (f"{bs[k_]:.2f}" if k_ in bs else "")
-                   for k_, _ in rows]), hide_index=True, use_container_width=True)
+                   for k_, _ in rows]), hide_index=True, width="stretch")
     st.download_button("Download daily returns (CSV)",
                        pd.DataFrame({"strategy": res.returns, "gross": res.gross_returns,
                                      "costs": res.costs, "benchmark": res.benchmark}).to_csv(),

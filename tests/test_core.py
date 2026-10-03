@@ -21,6 +21,8 @@ def test_no_lookahead(data):
     shocked.iloc[cut + 1:] *= np.random.default_rng(0).uniform(0.5, 1.5, shocked.iloc[cut + 1:].shape)
     alt = run_backtest(shocked)
     pd.testing.assert_series_equal(base.returns.iloc[: cut + 1], alt.returns.iloc[: cut + 1])
+    pd.testing.assert_frame_equal(base.weights.iloc[: cut + 1], alt.weights.iloc[: cut + 1])
+    pd.testing.assert_series_equal(base.turnover.iloc[: cut + 1], alt.turnover.iloc[: cut + 1])
 
 
 def test_zero_costs_means_gross_equals_net(data):
@@ -78,3 +80,22 @@ def test_summary_runs_with_benchmark(data):
     s = metrics.summary(run_backtest(prices, benchmark=bench))
     assert {"Sharpe", "Max Drawdown", "Beta"} <= s.keys()
     assert np.isfinite(s["Sharpe"])
+
+
+def test_cash_earns_risk_free_and_sharpe_uses_excess(data):
+    prices, bench = data
+    rf = pd.Series(0.04 / 252, index=prices.index)
+    cfg = Config(mode="long_only", max_weight=0.05)  # caps leave cash idle
+    no_rf, with_rf = run_backtest(prices, cfg, bench), run_backtest(prices, cfg, bench, rf)
+    live = with_rf.weights.abs().sum(axis=1) > 0
+    assert (with_rf.returns[live] > no_rf.returns[live]).mean() > 0.99  # idle cash adds rf every day
+    s = metrics.summary(with_rf)
+    r = with_rf.returns.loc[metrics.first_trade(with_rf):]
+    assert s["Sharpe"] == pytest.approx(metrics.sharpe(r, rf))
+    assert s["Sharpe"] < metrics.sharpe(r)
+
+
+def test_monthly_table_labels_partial_first_year():
+    r = pd.Series(0.001, index=pd.bdate_range("2020-03-02", "2021-02-26"))
+    t = metrics.monthly_table(r)
+    assert list(t.columns[:3]) == ["Jan", "Feb", "Mar"] and np.isnan(t.loc[2020, "Jan"])

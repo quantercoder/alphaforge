@@ -5,3 +5,5 @@ __pycache__/
 *.egg-info/
 .env
 site/data.json
+site/crypto.json
+alerts.txt

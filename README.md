@@ -1,8 +1,8 @@
 # AlphaForge
 
-**[Open the terminal](https://z125081-sam-lam.github.io/alphaforge/)** · [Math model](docs/MATH.md) · [Live trading](docs/LIVE_TRADING.md)
+**Terminal: [Equities](https://z125081-sam-lam.github.io/alphaforge/) · [Crypto](https://z125081-sam-lam.github.io/alphaforge/crypto.html)** · [Math model](docs/MATH.md) · [Research](docs/RESEARCH.md) · [Live trading](docs/LIVE_TRADING.md)
 
-A multi-factor equity strategy engine with a Bloomberg-style web terminal, a paper/live trading job and a Streamlit research dashboard. It follows the workflow a systematic equity desk uses: cross-sectional factor signals, risk-aware portfolio construction, and a backtest with execution lag, weight drift and transaction costs. The backtest is tested for look-ahead bias.
+A multi-factor equity strategy and a separate trend-following crypto strategy, with a Bloomberg-style web terminal, a paper/live trading job and a Streamlit research dashboard. It follows the workflow a systematic equity desk uses: cross-sectional factor signals, risk-aware portfolio construction, and a backtest with execution lag, weight drift and transaction costs. The backtest is tested for look-ahead bias.
 
 ```bash
 pip install -r requirements.txt
@@ -11,19 +11,23 @@ python -m alphaforge --synthetic  # CLI, offline
 python -m alphaforge --mode long_only --start 2015-01-01
 pytest -q
 python -m alphaforge.live         # one trading day (paper simulator by default)
+python -m alphaforge.research     # factor ICs, benchmarks, walk-forward, deflated Sharpe -> docs/RESEARCH.md
 ```
 
 ## Terminal
 
-`site/index.html` is a static, keyboard-driven terminal hosted on GitHub Pages. It reads `site/data.json`, which `python -m alphaforge.live` writes.
+Two static, keyboard-driven pages on GitHub Pages, one per sleeve, sharing `site/terminal.js` and `site/terminal.css`: **Equities** (`index.html`, reads `data.json`) and **Crypto** (`crypto.html`, reads `crypto.json`). Tabs at the top switch between them; both can be open at once.
 
-- Command line: type `NVDA` and press Enter to chart it. `PORT`, `SIG`, `RISK`, `BT`, `BLTR`, `MTH` and `HELP` jump to panels, and F1–F8 do the same.
+- Command line with suggestions: type a ticker, part of a company or coin name ("apple", "ether"), or a function. Arrow keys and Enter pick, Tab completes. `PORT`, `SIG`, `RISK`, `BT`, `BLTR`, `MTH`, `EQUITY`, `CRYPTO` and `HELP` work as commands, and F1–F8 jump to panels.
+- **Book with live P&L, the way Alpaca shows it:** quantity, average cost, value, today's P&L and unrealized P&L per position, with totals, for that sleeve only. With live prices on, every number updates tick by tick.
 - Market strip (SPX, NDX, RTY, VIX, 10Y, DXY, gold, WTI, BTC, EURUSD), and a monitor of the S&P 100 plus the strategy's names, with All / Strategy / Live tabs, sparklines and candlestick charts. The strategy trades only its 30 names; the rest are watch-only (`"watchlist"` in `live.json`).
-- The paper book, order blotter, per-name signals, ex-ante risk with factor exposures and a correlation matrix, the backtest and a monthly returns grid.
+- Order blotter (times in New York, slippage of each fill against the signal price), signals, and a monthly returns grid.
+- Risk for the sleeve: forecast vs realized volatility, parametric and historical VaR, beta, a stress test, sector exposure, each name's share of risk, distance to the drawdown halt, a labelled correlation map, and one line for the whole account.
+- Backtest panel: growth and underwater charts against SPY (or Bitcoin), an equal-weight portfolio of the same names, and momentum alone, plus a comparison table.
 
 **Data.** A GitHub Actions job (`.github/workflows/terminal.yml`) refreshes delayed Yahoo data every 30 minutes during market hours. After each close it trades the paper account, commits `state/` and redeploys the page.
 
-**Live prices.** Type `LIVE` or click the status chip, then paste an Alpaca paper-account API key. The page then streams real-time trades from Alpaca's free IEX feed for up to 30 symbols, plus BTC. Every stock you open is live tracked; opening a 31st drops the one you opened longest ago. `LIVE LIST` shows the tracked set, which is remembered in your browser. Your key stays in your browser and is never sent to GitHub.
+**Live prices.** Type `LIVE` or click the status chip, then paste an Alpaca paper-account API key. The equities page streams real-time trades from Alpaca's free IEX feed for up to 30 symbols; the crypto page streams every coin. Every stock you open is live tracked; opening a 31st drops the one you opened longest ago. `LIVE LIST` shows the tracked set, which is remembered in your browser. Your key stays in your browser and is never sent to GitHub.
 
 ## Pipeline
 
@@ -54,18 +58,23 @@ Every parameter (universe, mode, rebalance frequency, vol target, caps, costs, f
 
 ## Honest results
 
-Defaults: 30 US mega caps, 2014 to present, monthly rebalance, 7 bps per unit traded.
+From [docs/RESEARCH.md](docs/RESEARCH.md) (2015 to 2026, net of costs, Sharpe excess of T-bills, ± one standard error):
 
-| Mode | CAGR | Sharpe | Max DD | Beta |
-|---|---|---|---|---|
-| Market-neutral L/S | ~1.5% | ~0.2 | -25% | 0.07 |
-| Long-only | ~15% | ~1.1 | -21% | 0.60 |
+| Series | CAGR | Sharpe | Max DD |
+|---|---|---|---|
+| Live equity strategy (30 names) | 18.8% | 1.06 ± 0.37 | -22.8% |
+| Same, walk-forward out of sample (2018 on) | 18.0% | 0.96 ± 0.41 | -23.8% |
+| **Equal weight, same 30 names** | **22.5%** | **1.11 ± 0.37** | -29.4% |
+| SPY | 14.2% | 0.73 ± 0.33 | -33.7% |
+| Crypto trend sleeve (from 2019) | 32.7% | 1.04 ± 0.46 | -47.6% |
+| Bitcoin buy and hold | 43.6% | 0.90 ± 0.44 | -76.6% |
 
-Read these numbers with care:
+What that means:
 
-- **The market-neutral book barely beats cash.** Classic price factors inside 30 heavily arbitraged mega caps carry very little alpha after costs. That is a realistic finding, not a bug.
-- **Long-only performance is mostly beta plus survivorship.** The universe is *today's* mega caps projected backward, so it already knows which companies won. A real study needs point-in-time index membership, delisted names included.
-- Weekly rebalancing roughly triples turnover and costs more than the faster signal earns back.
+- **No demonstrated edge over equal weight.** Holding the same 30 names equally beat every one of 20 settings tested on raw return; corrected for the number of trials, the chance the best setting truly beats it is about 2%. Adjusted for its lower beta the strategy adds about 2% a year, which is not significant. Its real effect is lower volatility and drawdown.
+- **Momentum is the only factor that predicts anything here** (rank IC t ≈ 2.2). Reversal predicts nothing and drives turnover; low volatility is significantly *negative* in this universe.
+- **Everything is survivorship-biased.** The universes are today's members projected backward, so every number above is a ceiling.
+- **Crypto trend-following buys drawdown control,** not a higher Sharpe ratio.
 
 ## What separates this from a live system
 
@@ -75,18 +84,21 @@ These limits are deliberate. The engine is built so each one can be swapped in:
 - **Universe**: a fixed list. Production needs a liquidity-screened universe that is rebuilt every period, typically 500–3000 names.
 - **Risk model**: a shrunk sample covariance. Production uses a factor risk model (Barra-style) and a constrained optimizer (cvxpy) with sector neutrality and turnover penalties.
 - **Costs**: linear bps. Production uses a square-root impact model scaled by ADV, plus borrow costs on shorts.
-- **Execution**: `live.py` trades a simulator or Alpaca (paper or live), with drawdown halt, kill switch, stale-data guard and fat-finger limits. It doesn't reconcile fills or manage intraday orders.
-- **Validation**: a single in-sample run. Use walk-forward splits and deflated Sharpe before trusting any parameter choice.
+- **Execution**: `live.py` trades a simulator or Alpaca (paper or live) in two separated sleeves, with per-sleeve drawdown halts and kill switches, idempotent order ids, a stale-data guard, fat-finger limits and email alerts through failed GitHub runs. It doesn't manage intraday orders.
+- **Validation**: `research.py` runs factor ICs, a walk-forward over a 20-setting grid and deflated Sharpe ratios. A point-in-time universe is still missing.
 
 ## Tests
 
 `tests/test_core.py` checks the properties that silently break backtests:
 
-- **No look-ahead**: scrambling every price after day *T* leaves every return up to *T* unchanged.
+- **No look-ahead**: scrambling every price after day *T* leaves every return, weight and trade up to *T* unchanged, with and without the swap overlay.
+- Idle cash earns the risk-free rate, and Sharpe is computed on excess returns.
 - Zero costs give gross = net, and higher costs give lower returns.
 - Position and leverage limits hold on every trade day.
 - Long-only never shorts. Long/short is dollar-neutral at unit gross.
 - Metric functions match hand-computed values.
+
+`tests/test_live.py` checks the trading job: the crypto sleeve's NAV ledger, that the stock strategy never sizes from or sells coins, that a crypto halt leaves stocks untouched, fractional crypto orders, idempotent retries, that stale-order cleanup never touches hand-placed orders, migration of old state, and the swap overlay end to end.
 
 CI runs on Python 3.11 and 3.12 on every push.
 

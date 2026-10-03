@@ -37,6 +37,8 @@ def alpha_to_weights(alpha, mode="long_short", top_frac=0.3):
     if mode == "long_short":
         s = a - a.mean()
         w[s.index] = s / s.abs().sum()
+    elif mode == "equal":
+        w[a.index] = 1 / len(a)
     elif mode == "long_only":
         n = max(1, int(round(len(a) * top_frac)))
         top = a.nlargest(n).rank()
@@ -74,8 +76,16 @@ def pick_swaps(held_pnl, alpha_row, k):
 def target_weights(alpha_row, hist_returns, mode, max_weight, target_vol, max_leverage,
                    cov_shrink=0.3):
     """Full pipeline for one rebalance date. `hist_returns` must end at the signal date."""
-    w = alpha_to_weights(alpha_row, mode)
+    if mode == "trend":
+        # Long only in up-trending assets, sized by inverse volatility (risk parity across trends).
+        vol = hist_returns.std().reindex(alpha_row.index)
+        u = (alpha_row.clip(lower=0) / vol).replace([np.inf, -np.inf], np.nan).fillna(0)
+        w = u / u.sum() if u.sum() > 0 else u * 0
+    else:
+        w = alpha_to_weights(alpha_row, mode)
     w = pd.Series(cap_weights(w.values, max_weight), index=w.index)
+    if target_vol is None:  # no risk scaling (equal-weight benchmark)
+        return w.clip(-max_weight, max_weight)
     sample = hist_returns.fillna(0).cov().values
     # Shrink toward diagonal: sample covariance on ~63 days x 30 names is noisy.
     cov = (1 - cov_shrink) * sample + cov_shrink * np.diag(np.diag(sample))

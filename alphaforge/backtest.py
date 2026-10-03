@@ -9,10 +9,11 @@ from . import portfolio, signals
 
 @dataclass
 class Config:
-    mode: str = "long_short"          # long_short | long_only
+    model: str = "factors"            # factors | trend | equal  (what scores the assets)
+    mode: str = "long_short"          # long_short | long_only | trend | equal  (scores -> weights)
     rebalance: str = "ME"             # pandas offset alias: ME, W-FRI, QE... (weekly ~3x turnover)
     execution_lag: int = 1            # days between signal close and trade close
-    target_vol: float = 0.10          # annualized, ex-ante
+    target_vol: float | None = 0.10   # annualized, ex-ante; None = no risk scaling
     max_weight: float = 0.10          # |w_i| as fraction of NAV
     max_leverage: float = 2.0         # gross exposure cap
     cost_bps: float = 2.0             # commissions + fees per unit traded
@@ -21,6 +22,7 @@ class Config:
     warmup: int = 252                 # days before the first trade (momentum needs a year)
     swap_every: int = 0               # trading days between "replace the worst" checks; 0 = off
     swap_count: int = 2               # long holdings replaced at each check
+    ann: int = 252                    # periods per year: 252 equities, 365 crypto
     factor_weights: dict = field(default_factory=lambda: {
         "momentum": 0.4, "reversal": 0.2, "low_vol": 0.2, "quality_trend": 0.2})
 
@@ -34,6 +36,7 @@ class Result:
     costs: pd.Series
     alpha: pd.DataFrame       # combined alpha panel
     benchmark: pd.Series | None
+    rf: pd.Series | None      # daily risk-free return earned on cash
     config: Config
 
     @property
@@ -55,17 +58,19 @@ def targets_at(alpha, rets, i, cfg):
         alpha.iloc[i], hist, cfg.mode, cfg.max_weight, cfg.target_vol, cfg.max_leverage)
 
 
-def run_backtest(prices, cfg=None, benchmark=None):
+def run_backtest(prices, cfg=None, benchmark=None, rf=None):
     """Signals at close t, trade at close t+lag, earn returns from t+lag+1 onward.
 
     Weights drift with prices between rebalances, so costs reflect the real trade
-    from drifted holdings to target rather than from the last target.
+    from drifted holdings to target rather than from the last target. With `rf` (daily
+    risk-free returns), uninvested NAV, 1 - sum(w), earns it.
     """
     cfg = cfg or Config()
     prices = prices.sort_index()
     rets = prices.pct_change()
-    alpha = signals.combine(signals.factor_scores(prices), cfg.factor_weights)
+    alpha = signals.alpha_panel(prices, cfg)
     idx = prices.index
+    RF = np.zeros(len(idx)) if rf is None else rf.reindex(idx).ffill().fillna(0).values
 
     targets, signal_rows = {}, set()
     for d in rebalance_dates(idx, cfg.rebalance, cfg.warmup):
@@ -88,7 +93,7 @@ def run_backtest(prices, cfg=None, benchmark=None):
 
     for t in range(n):
         r = R[t]
-        g = float(w @ r)
+        g = float(w @ r) + (1 - w.sum()) * RF[t]
         gross[t] = g
         # NAV-relative drift: each position grows with its asset, NAV grows with the book.
         w = w * (1 + r) / (1 + g) if (1 + g) > 0 else w * 0
@@ -127,5 +132,6 @@ def run_backtest(prices, cfg=None, benchmark=None):
         weights=pd.DataFrame(W, index=idx, columns=prices.columns),
         turnover=s(turn), costs=s(cost), alpha=alpha,
         benchmark=None if benchmark is None else benchmark.reindex(idx).pct_change().fillna(0),
+        rf=None if rf is None else s(RF),
         config=cfg,
     )

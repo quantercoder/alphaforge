@@ -67,3 +67,12 @@ jobs:
           path: site
       - id: deploy
         uses: actions/deploy-pages@v4
+
+      - name: Fail on alerts (GitHub emails the repository owner)
+        if: always()
+        run: |
+          if [ -s alerts.txt ]; then
+            echo "::error::AlphaForge raised alerts"
+            cat alerts.txt
+            exit 1
+          fi
