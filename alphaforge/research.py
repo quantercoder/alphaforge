@@ -111,6 +111,56 @@ def walk_forward(prices, bench, rf, base, ew, first_test_year=2018):
             "years": len(next(iter(act.values()))) / 252}
 
 
+OPTIMIZER_KEYS = ("max_sector", "max_beta", "turnover_penalty")
+EDGE_PERIODS = [(2015, 2017), (2018, 2020), (2021, 2023), (2024, 2026)]
+
+
+def _ir(a):
+    a = a.dropna()
+    return a.mean() / a.std() * math.sqrt(252) if len(a) > 20 and a.std() > 0 else float("nan")
+
+
+def edge_test(p30, p100, bench, rf, base, wf):
+    """The pre-registered test in docs/PREREGISTRATION.md, rule by rule. Returns a dict for the report.
+    The candidate is the configuration registered: live.json as it was then, without the optimizer."""
+    base = {k: v for k, v in base.items() if k not in OPTIMIZER_KEYS}
+    ic30 = factor_ic(p30, horizons=(21, 63))
+    ic100 = factor_ic(p100, horizons=(63,))
+    m, tq = ic30["momentum"]["ic"], ic30["quality_trend"]["ic"]
+    use_tq = max(tq[21][1], tq[63][1]) >= 2.0
+    fw = {"momentum": 0.5 if use_tq else 1.0, "reversal": 0, "low_vol": 0, "quality_trend": 0.5 if use_tq else 0}
+    k = dict(cost_bps=Config(**base).cost_bps, slippage_bps=Config(**base).slippage_bps, warmup=Config(**base).warmup)
+    eq = Config(model="equal", mode="equal", target_vol=None, max_weight=1, max_leverage=1, **k)
+
+    def active(prices):
+        c = run_backtest(prices, Config(**{**base, "factor_weights": fw}), bench, rf)
+        e = run_backtest(prices, eq, None, rf)
+        t0 = metrics.first_trade(c)
+        return c.returns.loc[t0:], e.returns.loc[t0:], (c.returns - e.returns).loc[t0:]
+
+    cand, ew, a = active(p30)
+    years = len(a) / 252
+    ir = _ir(a)
+    n_trials = wf["grid"] + 2  # the grid, the candidate, and the trend-quality check
+    trial_srs = [v / math.sqrt(252) for v in wf["ir"].values()] + [a.mean() / a.std()]
+    dsr, ir0 = deflated_sharpe(a, trial_srs, n_trials)
+    periods = {f"{y0}–{str(y1)[2:]}": _ir(a[(a.index.year >= y0) & (a.index.year <= y1)]) for y0, y1 in EDGE_PERIODS}
+    _, _, a100 = active(p100)
+    rules = [
+        ("1. Signal", m[21][0] > 0 and m[63][0] > 0 and max(m[21][1], m[63][1]) >= 2.0 and ic100["momentum"]["ic"][63][0] > 0,
+         f"IC 21d {m[21][0]:+.3f} (t {m[21][1]:+.1f}), 63d {m[63][0]:+.3f} (t {m[63][1]:+.1f}); "
+         f"S&P 100 63d {ic100['momentum']['ic'][63][0]:+.3f} (t {ic100['momentum']['ic'][63][1]:+.1f})"),
+        ("2. Edge vs equal weight", ir * math.sqrt(years) >= 2.0, f"IR {ir:+.2f} over {years:.1f} years, t = {ir * math.sqrt(years):+.1f}"),
+        ("3. Deflated", dsr >= 0.95, f"{dsr:.0%} after {n_trials} trials (luck alone gives IR ≈ {ir0:+.2f})"),
+        ("4. Stability", sum(v > 0 for v in periods.values()) >= 3, ", ".join(f"{k_} {v:+.2f}" for k_, v in periods.items())),
+        ("5. Breadth", _ir(a100) > 0, f"S&P 100 IR vs its equal weight {_ir(a100):+.2f}"),
+        ("6. Survivorship-free", None, "not run: needs point-in-time data with delisted stocks (Norgate, Sharadar, CRSP)"),
+    ]
+    passed = all(r[1] for r in rules[:5])
+    return {"use_tq": use_tq, "tq": tq, "fw": fw, "rules": rules, "passed": passed, "cand": cand, "ew": ew,
+            "verdict": "provisionally demonstrated, pending point-in-time data" if passed else "no demonstrated edge"}
+
+
 def _row(name, r, rf, ann=252, bench=None):
     s = metrics.stats(r, rf, ann, bench)
     return (f"| {name} | {s['CAGR']:.1%} | {s['Ann. Vol']:.1%} | {s['Sharpe']:.2f} ± {s['Sharpe SE']:.2f} | "
@@ -148,7 +198,8 @@ def main():
     t0 = metrics.first_trade(live)
     k = dict(cost_bps=live.config.cost_bps, slippage_bps=live.config.slippage_bps, warmup=live.config.warmup)
     ew = run_backtest(p30, Config(model="equal", mode="equal", target_vol=None, max_weight=1, max_leverage=1, **k), None, rf)
-    mom = run_backtest(p30, Config(**{**base, "swap_every": 0, "factor_weights": PRESETS["momentum only"]}), None, rf)
+    plain = {k: v for k, v in base.items() if k not in OPTIMIZER_KEYS}
+    old = run_backtest(p30, Config(**{**plain, "factor_weights": PRESETS["default 40/20/20/20"]}), None, rf)
     noswap = run_backtest(p30, Config(**{**base, "swap_every": 0}), None, rf)
     rft = rf.loc[t0:]
     L += ["## 2. Live strategy against benchmarks", "",
@@ -156,7 +207,7 @@ def main():
           "| Series | CAGR | Vol | Sharpe | Max DD |", "|---|---|---|---|---|",
           _row("Live strategy (30 names)", live.returns.loc[t0:], rft),
           _row("Same, without the 2-week swap", noswap.returns.loc[t0:], rft),
-          _row("Momentum only", mom.returns.loc[t0:], rft),
+          _row("Old 4-factor blend (replaced in October 2026)", old.returns.loc[t0:], rft),
           _row("Equal weight, same 30 names", ew.returns.loc[t0:], rft),
           _row("SPY", live.benchmark.loc[t0:], rft), ""]
     b, a = metrics.beta_alpha(live.returns.loc[t0:], ew.returns.loc[t0:], rft)
@@ -164,7 +215,7 @@ def main():
           f"is {a:+.1%}. That alpha is what the factors add beyond simply owning these winners.", ""]
 
     # 3-4. walk-forward + DSR
-    wf = walk_forward(p30, bench, rf, base, ew.returns)
+    wf = walk_forward(p30, bench, rf, plain, ew.returns)  # the grid as pre-registered: simple construction
     oos = wf["oos"]
     rfo = rf.reindex(oos.index).fillna(0)
     best = wf["best_full"]
@@ -211,6 +262,61 @@ def main():
           _row("30 mega caps (live)", live.returns.loc[tw:], rf.loc[tw:]), "",
           "Wider universes need a point-in-time constituent list (Norgate, Sharadar or CRSP) before the comparison "
           "means much; today's S&P 100 is just as survivorship-biased as today's top 30.", ""]
+
+    # 7. pre-registered edge test (written up before it was run: docs/PREREGISTRATION.md)
+    et = edge_test(p30, p100, bench, rf, base, wf)
+    te0 = et["cand"].index[0]
+    L += ["## 7. Pre-registered edge test", "",
+          "The rules were committed before this test ran ([PREREGISTRATION.md](PREREGISTRATION.md)). Candidate: "
+          + ("momentum + trend quality (trend quality's own IC cleared t ≥ 2)" if et["use_tq"] else
+             f"momentum only (trend quality's IC t-stat was {et['tq'][21][1]:+.1f} at 21 days and {et['tq'][63][1]:+.1f} "
+             "at 63 days, under the 2.0 needed to join)") + ". Benchmark: equal weight of the same names.", "",
+          "| Rule | Result | Evidence |", "|---|---|---|"]
+    for name, ok, ev in et["rules"]:
+        L.append(f"| {name} | {'pass' if ok else 'not run' if ok is None else '**fail**'} | {ev} |")
+    L += ["", "| Series | CAGR | Vol | Sharpe | Max DD |", "|---|---|---|---|---|",
+          _row("Candidate", et["cand"], rf.loc[te0:]), _row("Equal weight, same 30 names", et["ew"], rf.loc[te0:]), ""]
+    rft0 = rf.loc[te0:]
+    bb, aa = metrics.beta_alpha(et["cand"], et["ew"], rft0)
+    resid = (et["cand"] - rft0) - bb * (et["ew"] - rft0)
+    L += [f"Supplementary, not one of the rules: the candidate holds less market than equal weight (beta {bb:.2f} against it), "
+          f"which costs return in a rising market. Adjusted for that, its alpha over equal weight is {aa:+.1%} a year "
+          f"(t = {resid.mean() / resid.std() * math.sqrt(len(resid)):+.1f}). This doesn't change the verdict.", "",
+          f"**Verdict: {et['verdict']}.** " + (
+              "Rules 1–5 pass; the edge still has to be confirmed on survivorship-free data before outside money."
+              if et["passed"] else
+              "At least one rule failed. On this evidence the strategy is not suitable for outside money: it has not "
+              "shown that it beats holding the same stocks in equal weight by more than luck and the number of tries "
+              "explain."), ""]
+
+    # 8. constrained construction
+    from .refdata import sector
+    plain_cfg = {**{k: v for k, v in base.items() if k not in OPTIMIZER_KEYS}, "factor_weights": PRESETS["momentum only"]}
+    opt_cfg = {**plain_cfg, **{k: base.get(k) or d for k, d in zip(OPTIMIZER_KEYS, (0.40, 1.2, 0.001))}}
+    rows = []
+    for label, c in (("Momentum, simple construction", plain_cfg), ("Momentum, optimizer", opt_cfg)):
+        r = run_backtest(p30, Config(**c), bench, rf)
+        t0_ = metrics.first_trade(r)
+        w = r.weights.loc[t0_:][r.turnover.loc[t0_:] > 0]
+        sec = w.T.groupby(sector).sum().T.max(axis=1)
+        a = (r.returns - ew.returns).loc[t0_:]
+        yrs = len(r.returns.loc[t0_:]) / 252
+        rows.append((label, r.returns.loc[t0_:], sec.mean(), sec.max(), (sec > 0.40 + 1e-9).mean(),
+                     r.turnover.loc[t0_:].sum() / yrs, _ir(a)))
+    L += ["## 8. Constrained construction (optimizer)", "",
+          f"Risk control, not a source of return: the settings ({', '.join(f'{k} {opt_cfg[k]}' for k in OPTIMIZER_KEYS)}) were "
+          "fixed before this ran and were not tuned on it. At each rebalance the optimizer finds the long-only portfolio "
+          "closest to the simple target (in tracking variance) that keeps every sector at or under 40% and beta to the "
+          "equal-weighted universe at or under 1.2, with a turnover penalty ([MATH.md §9.5](MATH.md#95-constrained-construction-optimizer)).", "",
+          "| Construction | CAGR | Vol | Sharpe | Max DD |", "|---|---|---|---|---|"]
+    L += [_row(lb, r_, rf.loc[r_.index[0]:]) for lb, r_, *_ in rows]
+    L += ["", "| Construction | Largest sector, average | Largest sector, worst | Rebalances over 40% | Turnover / year | IR vs equal weight |",
+          "|---|---|---|---|---|---|"]
+    L += [f"| {lb} | {m_:.0%} | {mx:.0%} | {br:.0%} | {to:.1f}× | {ir_:+.2f} |" for lb, _, m_, mx, br, to, ir_ in rows]
+    L += ["", "With the optimizer every rebalance ends at or under the 40% sector cap. The remaining breaches are swap days: "
+          "prices moved a sector above 40% between rebalances, and a swap refuses to add to a full sector but doesn't trim "
+          "it. The next month-end rebalance brings it back.", "",
+          "It changes where the risk sits, not whether there is an edge: §7's verdict applies to both.", ""]
 
     # 6. crypto
     cc = load_config("live.json")

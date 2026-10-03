@@ -51,6 +51,7 @@ prices ─▶ factors ─▶ z-score + winsorize ─▶ blended alpha ─▶ wei
 | **Normalization** | Cross-sectional z-score per day, winsorized at ±3σ, weighted blend re-standardized | `signals.py` |
 | **Construction** | Dollar-neutral L/S (demeaned alpha) or long-only (top 30%, rank-weighted) | `portfolio.py` |
 | **Risk** | Position cap with excess redistributed, ex-ante vol targeting on a shrunk 63-day covariance, gross leverage cap, hard per-name NAV limit | `portfolio.py` |
+| **Optimizer** | Closest portfolio to the target with sector ≤ 40%, beta ≤ 1.2 and a turnover penalty; a dependency-free QP solver (ADMM, as in OSQP) | `portfolio.optimize`, `solve_qp` |
 | **Execution** | Signal at close *t*, trade at close *t+1*. Weights drift with prices between rebalances, and costs (commission + slippage bps) are charged on the actual trade from drifted holdings | `backtest.py` |
 | **Live** | Month-end signal from the same code path, whole-share order sizing, sells before buys, sim or Alpaca broker, drawdown halt | `live.py`, `broker.py` |
 | **Analytics** | CAGR, Sharpe, Sortino, Calmar, max drawdown, historical VaR/CVaR, beta/alpha, turnover, cost drag, monthly table | `metrics.py` |
@@ -73,7 +74,8 @@ From [docs/RESEARCH.md](docs/RESEARCH.md) (2015 to 2026, net of costs, Sharpe ex
 
 | Series | CAGR | Sharpe | Max DD |
 |---|---|---|---|
-| Live equity strategy (30 names) | 18.8% | 1.06 ± 0.37 | -22.8% |
+| Live equity strategy (momentum + optimizer) | 18.8% | 1.08 ± 0.37 | -21.7% |
+| Old 4-factor blend (replaced) | 18.8% | 1.06 ± 0.37 | -22.8% |
 | Same, walk-forward out of sample (2018 on) | 18.0% | 0.96 ± 0.41 | -23.8% |
 | **Equal weight, same 30 names** | **22.5%** | **1.11 ± 0.37** | -29.4% |
 | SPY | 14.2% | 0.73 ± 0.33 | -33.7% |
@@ -82,6 +84,7 @@ From [docs/RESEARCH.md](docs/RESEARCH.md) (2015 to 2026, net of costs, Sharpe ex
 
 What that means:
 
+- **A pre-registered test said no.** The rules for calling momentum's edge "demonstrated" were committed before running it ([PREREGISTRATION.md](docs/PREREGISTRATION.md)). It failed four of five: information ratio against equal weight $-0.34$ ($t = -1.2$), 1% probability after deflating for 22 trials, negative in 3 of 4 periods and on the S&P 100 ([RESEARCH.md §7](docs/RESEARCH.md#7-pre-registered-edge-test)). **It is not suitable for outside money in this form.**
 - **No demonstrated edge over equal weight.** Holding the same 30 names equally beat every one of 20 settings tested on raw return; corrected for the number of trials, the chance the best setting truly beats it is about 2%. Adjusted for its lower beta the strategy adds about 2% a year, which is not significant. Its real effect is lower volatility and drawdown.
 - **Momentum is the only factor that predicts anything here** (rank IC t ≈ 2.2). Reversal predicts nothing and drives turnover; low volatility is significantly *negative* in this universe.
 - **Everything is survivorship-biased.** The universes are today's members projected backward, so every number above is a ceiling.
@@ -93,7 +96,7 @@ These limits are deliberate. The engine is built so each one can be swapped in:
 
 - **Data**: Yahoo adjusted closes. Production needs a point-in-time vendor (CRSP, Norgate, Polygon) with corporate actions and delistings.
 - **Universe**: a fixed list. Production needs a liquidity-screened universe that is rebuilt every period, typically 500–3000 names.
-- **Risk model**: the terminal has a Barra-style factor risk model for monitoring and attribution, but portfolio construction still sizes with a shrunk sample covariance. Production feeds the factor model into a constrained optimizer (cvxpy) with sector, beta and turnover constraints, and uses fundamental styles (value, quality, size), not only price-based ones.
+- **Risk model**: the terminal has a Barra-style factor risk model for monitoring and attribution, and construction runs a constrained optimizer (sector, beta, turnover), but the optimizer uses the shrunk sample covariance, not the factor model, and the styles are price-based only. Production uses fundamental styles (value, quality, size) and the factor model inside the optimizer.
 - **Costs**: linear bps in the backtest. TCA on the terminal measures what fills actually cost (delay, impact, participation); production uses a square-root impact model scaled by ADV, plus borrow costs on shorts.
 - **Process**: an approval step, an audit trail and limits with traffic lights exist, but there is no independent risk team, model validation or compliance sign-off, which is the human layer real desks rely on.
 - **Execution**: `live.py` trades a simulator or Alpaca (paper or live) in two separated sleeves, with per-sleeve drawdown halts and kill switches, idempotent order ids, a stale-data guard, fat-finger limits and email alerts through failed GitHub runs. It doesn't manage intraday orders.
@@ -110,7 +113,7 @@ These limits are deliberate. The engine is built so each one can be swapped in:
 - Long-only never shorts. Long/short is dollar-neutral at unit gross.
 - Metric functions match hand-computed values.
 
-`tests/test_desk.py` checks the desk analytics: risk shares (by factor group and by name) add up to 100% and total variance = factor + specific; attribution adds up exactly to the strategy's return; TCA splits slippage into delay and impact; traffic-light thresholds; and that the approval gate holds a rebalance across runs and releases it on approval.
+`tests/test_desk.py` checks the desk analytics and construction: the QP solver against a known answer, the optimizer's sector, beta and position limits and turnover penalty, that the optimized backtest has no look-ahead, the shadow backtest's start date, and that the crypto carve-out isn't counted as a loss. It also checks the desk analytics: risk shares (by factor group and by name) add up to 100% and total variance = factor + specific; attribution adds up exactly to the strategy's return; TCA splits slippage into delay and impact; traffic-light thresholds; and that the approval gate holds a rebalance across runs and releases it on approval.
 
 `tests/test_live.py` checks the trading job: the crypto sleeve's NAV ledger, that the stock strategy never sizes from or sells coins, that a crypto halt leaves stocks untouched, fractional crypto orders, idempotent retries, that stale-order cleanup never touches hand-placed orders, migration of old state, and the swap overlay end to end.
 

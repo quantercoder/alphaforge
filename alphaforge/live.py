@@ -24,7 +24,7 @@ from . import backtest, portfolio, signals
 from .backtest import Config
 from .broker import AlpacaBroker, SimBroker
 from .data import DEFAULT_UNIVERSE, MARKET_STRIP, SP100, download, load_prices, risk_free
-from .refdata import yahoo
+from .refdata import sector, yahoo
 
 DEFAULTS = {
     "broker": "sim",              # sim | alpaca
@@ -182,6 +182,11 @@ def swap_orders(drop, add, positions, prices, sc):
     return orders
 
 
+def current_weights(positions, nav, px):
+    """Today's weight of each held name in the sleeve (for the optimizer's turnover penalty)."""
+    return pd.Series({s: p["qty"] * float(px[s]) / nav for s, p in positions.items() if s in px and nav}, dtype=float)
+
+
 # ---------------------------------------------------------------- sleeve NAVs
 
 def _mark(p, s, px):
@@ -276,7 +281,7 @@ def step_sleeve(name, sc, prices, broker, m, nav, positions, d, state_dir):
             m["awaiting"] = None
         if reb:
             alpha = signals.alpha_panel(prices, strat)
-            w = backtest.targets_at(alpha, rets, len(prices) - 1, strat)
+            w = backtest.targets_at(alpha, rets, len(prices) - 1, strat, current_weights(positions, nav, px))
             w = {k: round(float(v), 6) for k, v in w.items() if v and np.isfinite(v)}
             m["last_signal"], m["target"] = d, w
             events.append("generated month-end signal" if name == "equity" else "generated weekly signal")
@@ -290,7 +295,8 @@ def step_sleeve(name, sc, prices, broker, m, nav, positions, d, state_dir):
             held = {s: float(px[s]) / q["avg_cost"] - 1 for s, q in positions.items()
                     if q["qty"] > 0 and s in px and s in prices.columns and q["avg_cost"] > 0}
             alpha = signals.alpha_panel(prices, strat)
-            drop, add = portfolio.pick_swaps(held, alpha.iloc[-1], strat.swap_count)
+            drop, add = portfolio.pick_swaps(held, alpha.iloc[-1], strat.swap_count,
+                                             current_weights(positions, nav, px).to_dict(), sector, strat.max_sector)
             events.append(f"swap check: drop {drop or 'none'}, add {add or 'none'}")
             if drop and m.get("target"):
                 t = dict(m["target"])

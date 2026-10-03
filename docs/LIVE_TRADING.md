@@ -71,7 +71,9 @@ GitHub may delay scheduled runs by several minutes at busy times, and pauses sch
   "live_money": false,
   "capital": 100000,
   "strategy": {"mode": "long_only", "target_vol": 0.12, "max_weight": 0.1, "max_leverage": 1.0,
-               "swap_every": 10, "swap_count": 2},
+               "swap_every": 10, "swap_count": 2,
+               "factor_weights": {"momentum": 1.0, "reversal": 0.0, "low_vol": 0.0, "quality_trend": 0.0},
+               "max_sector": 0.4, "max_beta": 1.2, "turnover_penalty": 0.001},
   "min_trade_notional": 200,
   "max_order_notional": 25000,
   "max_drawdown_halt": 0.2,
@@ -82,6 +84,8 @@ GitHub may delay scheduled runs by several minutes at busy times, and pauses sch
 `crypto` accepts any key from `CRYPTO_DEFAULTS` in `live.py`: `universe`, `strategy` (target vol 25%, max 35% per coin), `rebalance_days` (7), `cash_buffer` (2%), `max_drawdown_halt` (50%), `max_order_notional` (\$5,000). Set `"enabled": false` to stop the crypto strategy; coins then stay where they are and are excluded from the equity sleeve's NAV.
 
 `watchlist` (optional, defaults to the S&P 100) lists extra tickers the terminal shows. It doesn't change what the strategy trades; that's `universe`. Use Yahoo symbols, for example `BRK-B`.
+
+`factor_weights` is momentum only since October 2026: the four-factor blend had no predictive power because low volatility predicts backwards on these names ([MATH.md §5](MATH.md#5-alpha-blending)). `max_sector`, `max_beta` and `turnover_penalty` switch on the optimizer: each rebalance is the portfolio closest to the simple target with every sector at or under 40%, beta at or under 1.2, and small trades skipped ([MATH.md §9.5](MATH.md#95-constrained-construction-optimizer)). Swaps also refuse to add to a full sector. Remove the three keys to go back to the simple construction.
 
 `strategy` accepts any `backtest.Config` field, so whatever you test in the dashboard can be run live unchanged. Keep `long_only` unless your broker account allows short selling.
 
@@ -121,7 +125,11 @@ Decide this before looking at results, write it down, and stick to it. A sensibl
 3. **Benchmark:** the paper sleeve does not trail an equal-weight portfolio of the same 30 names by more than its lower volatility explains. [RESEARCH.md](RESEARCH.md) shows the backtest itself doesn't clear this bar, so expect to fail it.
 4. **Controls:** the kill switch has been tested on paper (set `ALPHAFORGE_KILL=equity` for one run and confirm the sleeve flattens), and an alert email has actually arrived.
 
+The terminal tracks points 1–3 live: Performance → **Paper vs backtest** compares the paper sleeve with a backtest started the same day and shows each rule's status ([MATH.md §17.9](MATH.md#179-paper-against-backtest)).
+
 If any point fails, stay on paper. That decision is yours; this repository will not flip the switches.
+
+**Outside money is a different bar.** Managing other people's money needs a demonstrated edge, not a good-looking backtest. The pre-registered test ([PREREGISTRATION.md](PREREGISTRATION.md), [RESEARCH.md §7](RESEARCH.md#7-pre-registered-edge-test)) found **no demonstrated edge** over holding the same 30 stocks in equal weight. It also can't be completed without survivorship-free data. Taking outside money also brings legal duties (in the US, typically registering as an investment adviser and, for a pooled fund, the fund's own rules). Get qualified legal advice before accepting any.
 
 ## Stopping it
 

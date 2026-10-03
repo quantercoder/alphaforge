@@ -223,6 +223,41 @@ def _curve(state_dir, col):
     return c[col].dropna() if col in c else pd.Series(dtype=float)
 
 
+def _paper_navs(state_dir, sleeve):
+    """The sleeve's NAV at each trading run and its daily return. The equity sleeve's return is
+    (change in account - change in crypto NAV) / yesterday's equity NAV, so carving out the crypto
+    budget is not a loss; rows from before the crypto column existed take its first value."""
+    path = f"{state_dir}/equity.csv"
+    if not os.path.exists(path):
+        return pd.Series(dtype=float), pd.Series(dtype=float)
+    c = pd.read_csv(path, index_col=0, parse_dates=True).sort_index()
+    if sleeve == "crypto":
+        nav = c["crypto"].dropna() if "crypto" in c else pd.Series(dtype=float)
+        return nav, nav.pct_change().dropna()
+    acct = c["account"].fillna(c["equity"]) if "account" in c else c["equity"]
+    cry = c["crypto"].bfill().fillna(0) if "crypto" in c else acct * 0
+    nav = acct - cry
+    return nav, ((acct.diff() - cry.diff()) / nav.shift(1)).dropna()
+
+
+def tracking_block(state_dir, sleeve, prices, strat, bench, rf, ann, start=None):
+    """Paper sleeve against a shadow backtest that started the same day with today's settings."""
+    nav, r = _paper_navs(state_dir, sleeve)
+    start = pd.Timestamp(start).tz_localize(None).normalize() if start else (nav.index[0] if len(nav) else None)
+    nav = nav[nav.index >= start] if start is not None else nav
+    if len(nav) < 1:
+        return None
+    shadow = backtest.run_backtest(prices, strat, bench, rf, start=start)
+    s = (1 + shadow.returns.loc[start:]).cumprod().reindex(nav.index).ffill().fillna(1.0)
+    rp, rs = r.reindex(nav.index[1:]), s.pct_change().iloc[1:]
+    d = (rp - rs).dropna()
+    return {"start": str(start.date()), "dates": [str(i.date()) for i in nav.index],
+            "paper": (nav / nav.iloc[0]).tolist(), "shadow": (s / s.iloc[0]).tolist(), "n": len(d),
+            "paper_ret": float(nav.iloc[-1] / nav.iloc[0] - 1), "shadow_ret": float(s.iloc[-1] / s.iloc[0] - 1),
+            "te": float(d.std() * math.sqrt(ann)) if len(d) >= 5 else None,
+            "corr": float(rp.corr(rs)) if len(d) >= 20 else None}
+
+
 def _status(lc, sc, m, nav, rule):
     return {"broker": lc["broker"], "live_money": bool(lc["live_money"]) and lc["broker"] == "alpaca",
             "halted": m.get("halted", False), "last_signal": m.get("last_signal"), "last_swap": m.get("last_swap"),
@@ -305,7 +340,9 @@ def preview_block(name, sc, strat, m, tgt, pos, nav, prices, alpha_row, cost_bps
     if name == "equity" and strat.swap_every:
         held = {s: float(px[s]) / q["avg_cost"] - 1 for s, q in pos.items()
                 if q["qty"] > 0 and s in px and (q.get("avg_cost") or 0) > 0}
-        drop, add = portfolio.pick_swaps(held, alpha_row, strat.swap_count)
+        from .live import current_weights
+        drop, add = portfolio.pick_swaps(held, alpha_row, strat.swap_count, current_weights(pos, nav, px).to_dict(),
+                                         sector_fn, strat.max_sector)
         out["swap"] = {"drop": drop, "add": add, "pnl": {s: held[s] for s in drop},
                        **analytics.preview_orders(swap_orders(drop, add, pos, px, sc), px, pos, nav, sc, cost_bps, sector_fn)}
     return out
@@ -449,14 +486,16 @@ def equity_page(raw, prices, bench, lc, broker, state_dir, meta, nv, account, no
     base = dict(cost_bps=strat.cost_bps, slippage_bps=strat.slippage_bps, warmup=strat.warmup)
     ew = backtest.run_backtest(prices, Config(model="equal", mode="equal", target_vol=None, max_weight=1.0,
                                               max_leverage=1.0, **base), None, rf)
-    mom = backtest.run_backtest(prices, Config(**{**lc["strategy"], "swap_every": 0, "factor_weights": {
-        "momentum": 1.0, "reversal": 0, "low_vol": 0, "quality_trend": 0}}), None, rf)
+    old = backtest.run_backtest(prices, Config(**{k: v for k, v in lc["strategy"].items() if k not in (
+        "factor_weights", "max_sector", "max_beta", "turnover_penalty")}), None, rf)  # the 4-factor blend it replaced
     research = growth_block(res, {"SPY": res.benchmark, f"Equal weight {len(universe)}": ew.returns,
-                                  "Momentum only": mom.returns}, 252)
+                                  "Old 4-factor blend": old.returns}, 252)
 
     scores = signals.factor_scores(prices)
     alpha = signals.alpha_panel(prices, strat)
-    tgt = backtest.targets_at(alpha, rets, len(prices) - 1, strat)
+    from .live import current_weights
+    held = {s: p for s, p in nv["positions"].items() if p["cls"] == "us_equity"}
+    tgt = backtest.targets_at(alpha, rets, len(prices) - 1, strat, current_weights(held, nv["equity"], prices.iloc[-1]))
     sig = [{"sym": s, "alpha": alpha.iloc[-1][s], "target": tgt[s], "sector": sector(s),
             **{f: sc.iloc[-1][s] for f, sc in scores.items()}} for s in universe]
     sig.sort(key=lambda x: -(x["alpha"] if x["alpha"] == x["alpha"] else -9))
@@ -513,6 +552,7 @@ def equity_page(raw, prices, bench, lc, broker, state_dir, meta, nv, account, no
         "sleeve_curve": {"dates": list(_curve(state_dir, "equity").index), "curve": _curve(state_dir, "equity").tolist()},
         "book": book, "totals": totals, "blotter": blotter, "slippage": {"avg_bps": slip[0], "n": slip[1]},
         "risk": risk, "desk": desk,
+        "tracking": tracking_block(state_dir, "equity", prices, strat, bench, rf, 252),
     }
 
 
@@ -582,4 +622,5 @@ def crypto_page(craw, cprices, lc, broker, state_dir, meta, nv, account, now):
         "sleeve_curve": {"dates": list(_curve(state_dir, "crypto").index), "curve": _curve(state_dir, "crypto").tolist()},
         "book": book, "totals": totals, "blotter": blotter, "slippage": {"avg_bps": slip[0], "n": slip[1]},
         "risk": risk, "desk": desk,
+        "tracking": tracking_block(state_dir, "crypto", cprices, strat, btc, None, 365, m.get("start")) if m.get("start") else None,
     }

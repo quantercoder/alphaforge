@@ -20,7 +20,7 @@ This document specifies every quantity the engine computes, in the order the cod
 14. [Statistical caveats](#14-statistical-caveats)
 15. [Parameter reference](#15-parameter-reference)
 16. [The crypto sleeve](#16-the-crypto-sleeve)
-17. [Desk analytics](#17-desk-analytics): factor risk model, attribution, stress, liquidity, limits, TCA, signal diagnostics, approval and audit, next-trade preview, data health
+17. [Desk analytics](#17-desk-analytics): factor risk model, attribution, stress, liquidity, limits, TCA, signal diagnostics, approval and audit, next-trade preview, data health, paper against backtest
 
 ---
 
@@ -127,6 +127,8 @@ Given factor weights $\lambda_k$ (`Config.factor_weights`, default momentum 0.4,
 
 A missing factor contributes the cross-sectional mean (zero) rather than removing the name. A name is tradeable only if at least one factor with $\lambda_k \neq 0$ is defined for it. Because the blend is re-standardized, only the *ratios* of the $\lambda_k$ matter: multiplying all weights by the same constant changes nothing.
 
+**Live weights: momentum only.** Since October 2026 `live.json` sets $\lambda = (1, 0, 0, 0)$: momentum only. The four-factor blend had no predictive power on these 30 names (rank IC ≈ 0.01, $t \approx 0.6$) because low volatility predicts *backwards* here ($t \approx -4.7$) and reversal predicts nothing. Low volatility is dropped rather than flipped: "buy high volatility" would fit the survivorship bias of a universe built from today's winners. Trend quality could join only if its own IC reached $t \ge 2$; it didn't ($t \approx 0.9$). Choosing momentum after looking at the IC table is data snooping, so it was tested under rules written down first ([PREREGISTRATION.md](PREREGISTRATION.md)). The verdict was **no demonstrated edge over equal weight** ([RESEARCH.md §7](RESEARCH.md#7-pre-registered-edge-test)). Momentum is kept because it is the only factor with support in this sample and decades of out-of-sample evidence elsewhere, not because this test proved it.
+
 **Why a linear blend.** If the factor z-scores were jointly Gaussian with forecast-return covariances $\mathbf{b}$ and factor covariance $\mathbf{\Omega}$, the minimum-variance linear forecast would weight them by $\mathbf{\Omega}^{-1}\mathbf{b}$. Fixed $\lambda$ treats $\mathbf{\Omega}$ as diagonal and $\mathbf{b}$ as known. That is a deliberate bias-for-variance trade, because estimated $\mathbf{\Omega}^{-1}\mathbf{b}$ weights are notoriously unstable (DeMiguel, Garlappi & Uppal, 2009). The factors are in fact correlated: momentum and trend quality overlap, and low-vol tends to anti-correlate with momentum in strong bull markets.
 
 ## 6. From alpha to weights
@@ -231,6 +233,52 @@ With the live settings (long-only, $m = 10\%$, top 30% of 30 names, so 9 names),
 ```
 
 which is `portfolio.target_weights` and is called through `backtest.targets_at` by both the backtest and the live job.
+
+### 9.5 Constrained construction (optimizer)
+
+When `max_sector`, `max_beta` or `turnover_penalty` is set (all three are in `live.json`), the weights $\mathbf w^\star$ of §9.4 become a *target*, and `portfolio.optimize` finds the closest portfolio that respects the limits:
+
+```math
+\min_{\mathbf w}\; (\mathbf w - \mathbf w^\star)^\top \mathbf S\, (\mathbf w - \mathbf w^\star) + \tau \lVert \mathbf w - \mathbf w_0 \rVert_1
+\quad\text{s.t.}\quad
+0 \le w_i \le m,\;\; \mathbf 1^\top\mathbf w \le L_{\max},\;\; \sum_{i \in s} w_i \le c_{\text{sec}}\;\forall s,\;\; \boldsymbol\beta^\top \mathbf w \le c_\beta
+```
+
+- $\mathbf S = 252\,\hat{\mathbf\Sigma}$ is the annualized shrunk covariance of §8, so the objective is the squared tracking error to the target.
+- $\mathbf w_0$ is today's book (drifted weights in the backtest, actual positions in the live job).
+- $\tau$ (`turnover_penalty`, 0.001) is the price of one unit of turnover in units of annual tracking variance. A 1% move in a 30%-volatility stock reduces tracking variance by about $0.01^2 \times 0.3^2 \approx 10^{-5}$ and costs $\tau \times 0.01 = 10^{-5}$, so moves of about 1% or less are not worth making: a no-trade band.
+- $\beta_i$ is name $i$'s beta to the equal-weighted universe over the last 252 days; $c_\beta$ = `max_beta` (1.2), $c_{\text{sec}}$ = `max_sector` (0.40). Names in sector "Other" (unknown) have no sector limit. Names with no alpha get $w_i = 0$.
+
+Optimizing toward $\mathbf w^\star$ instead of $\max \boldsymbol\alpha^\top\mathbf w - \gamma\,\mathbf w^\top\mathbf\Sigma\mathbf w$ avoids putting $\alpha$ (a z-score) and risk on one scale, which would need an IC × volatility conversion this strategy hasn't earned (§14). The result: a book as close as possible to what the simple rules want, moved only as far as the limits require. Because $\mathbf w^\star$ is already volatility-targeted and every constraint is an upper bound, there is no rescaling afterwards.
+
+**Quadratic program.** With $\mathbf t \ge |\mathbf w - \mathbf w_0|$ as extra variables, $\mathbf x = (\mathbf w, \mathbf t)$:
+
+```math
+\min_{\mathbf x}\; \tfrac12 \mathbf x^\top \mathbf P \mathbf x + \mathbf q^\top \mathbf x
+\quad\text{s.t.}\quad \mathbf l \le \mathbf A \mathbf x \le \mathbf u,
+\qquad
+\mathbf P = \begin{pmatrix} 2\mathbf S & 0 \\ 0 & \epsilon \mathbf I\end{pmatrix},\;
+\mathbf q = \begin{pmatrix} -2\mathbf S \mathbf w^\star \\ \tau \mathbf 1\end{pmatrix}
+```
+
+The rows of $\mathbf A$ are the box, the budget, one row per sector, the beta row, and $\mathbf w + \mathbf t \ge \mathbf w_0$, $\mathbf w - \mathbf t \le \mathbf w_0$. `portfolio.solve_qp` solves it with the ADMM iteration used by OSQP (Stellato et al., 2020), with $\rho = 0.5$, $\sigma = 10^{-6}$ and over-relaxation $\alpha = 1.6$:
+
+```math
+\begin{aligned}
+\tilde{\mathbf x} &= (\mathbf P + \sigma \mathbf I + \rho \mathbf A^\top\mathbf A)^{-1}\big(\sigma \mathbf x^k - \mathbf q + \mathbf A^\top(\rho \mathbf z^k - \mathbf y^k)\big), \qquad \tilde{\mathbf z} = \mathbf A\tilde{\mathbf x} \\
+\mathbf x^{k+1} &= \alpha\tilde{\mathbf x} + (1-\alpha)\mathbf x^k, \qquad
+\mathbf z^{k+1} = \Pi_{[\mathbf l,\mathbf u]}\big(\alpha\tilde{\mathbf z} + (1-\alpha)\mathbf z^k + \mathbf y^k/\rho\big) \\
+\mathbf y^{k+1} &= \mathbf y^k + \rho\big(\alpha\tilde{\mathbf z} + (1-\alpha)\mathbf z^k - \mathbf z^{k+1}\big)
+\end{aligned}
+```
+
+It stops when the primal residual $\lVert\mathbf A\mathbf x - \mathbf z\rVert_\infty$ and the dual change $\rho\lVert \mathbf z^{k+1} - \mathbf z^k\rVert_\infty$ are both below $10^{-8}$. The matrix is inverted once per problem (at most 60 variables here). Last-digit violations are then repaired: clip to the box, and if a limit row still exceeds its bound, scale the book down by bound ÷ value. Scaling down can't break any other limit, because they are all upper bounds on non-negative weights. A test checks the solver against a known closed-form answer (projection onto a capped simplex).
+
+**Timing.** In the backtest the target is now computed inside the daily loop at the signal close, so $\mathbf w_0$ is the drifted book at that moment. It still uses only data up to that close; the no-look-ahead test runs with the optimizer on.
+
+**Swaps.** The two-week swap (§13.4) isn't optimized, but it is sector-aware: a candidate is skipped if its sector, after taking the dropped name's weight, would exceed `max_sector`. A swap never *trims* a sector that drifted over the cap since the last rebalance; the next rebalance does.
+
+**Effect** ([RESEARCH.md §8](RESEARCH.md#8-constrained-construction-optimizer)). Same Sharpe ratio; the worst sector weight on a trade day falls from 53% to 43% (every rebalance ends at or under 40%; the excess is drift on swap days); turnover falls from 5.7× to 3.6× a year. It controls where the risk sits. It doesn't create an edge.
 
 ## 10. Timing and the no-look-ahead guarantee
 
@@ -416,7 +464,9 @@ Optionally, every rebalance and swap can wait for a person's approval, and every
 
 **What the research found** ([RESEARCH.md](RESEARCH.md)). Momentum is the only factor with a positive rank IC here ($t \approx 2.2$ at 63 days). Reversal has none and causes most of the turnover; low volatility is significantly negative. Walk-forward, out of sample, the Sharpe ratio is about 0.96. No setting in the 20-setting grid beats an equal-weight portfolio of the same 30 names on raw returns; adjusted for its lower beta, the live strategy adds about 2% a year, which is not statistically distinguishable from zero.
 
-**Upgrade path,** in order of value: point-in-time universe → walk-forward validation → factor risk model with optimizer ($\max_{\mathbf w}\,\boldsymbol\alpha^\top\mathbf w - \tfrac{\gamma}{2}\mathbf w^\top\mathbf\Sigma\mathbf w - \tau\lVert\mathbf w - \mathbf w_0\rVert_1$ subject to sector and beta neutrality) → square-root impact costs.
+**Pre-registration.** Picking a configuration after seeing results is the most common way to fool yourself. Before momentum only replaced the blend, the rules for calling its edge "demonstrated" were committed to git ([PREREGISTRATION.md](PREREGISTRATION.md)): positive IC, information ratio against equal weight with $t \ge 2$, a deflated probability of at least 95% counting all 22 configurations tried, positive in 3 of 4 sub-periods, positive on the S&P 100, and confirmation on survivorship-free data. It failed four of the five rules that can be run (IR $-0.34$, $t = -1.2$; deflated probability 1%). On this evidence the strategy isn't suitable for outside money.
+
+**Upgrade path,** in order of value: a point-in-time universe with delisted stocks (the only way to test rule 6) → signals with independent evidence that this universe can't fake (fundamental value and quality, earnings revisions) → feeding the §17.1 factor model into the §9.5 optimizer in place of the sample covariance → square-root impact costs.
 
 ## 15. Parameter reference
 
@@ -427,7 +477,10 @@ Optionally, every rebalance and swap can wait for a person's approval, and every
 | Low-vol lookback | 63 days | `signals.low_vol` |
 | Trend-quality lookback | 126 days | `signals.quality_trend` |
 | Winsorization | ±3 σ | `signals.cs_zscore` |
-| Factor weights $\lambda$ | 0.4 / 0.2 / 0.2 / 0.2 | `Config.factor_weights` |
+| Factor weights $\lambda$ | 0.4 / 0.2 / 0.2 / 0.2 (live: 1 / 0 / 0 / 0, momentum only) | `Config.factor_weights` |
+| Sector cap $c_{\text{sec}}$ / beta cap $c_\beta$ | none (live: 40% / 1.2) | `Config.max_sector`, `max_beta` |
+| Turnover penalty $\tau$ | 0 (live: 0.001) | `Config.turnover_penalty` |
+| QP solver | ADMM, $\rho$ 0.5, $\sigma$ $10^{-6}$, relaxation 1.6, tolerance $10^{-8}$ | `portfolio.solve_qp` |
 | Long-only top fraction | 30% | `portfolio.alpha_to_weights` |
 | Covariance lookback $L$ | 63 days | `Config.cov_lookback` |
 | Shrinkage $\delta$ | 0.3 | `portfolio.target_weights` |
@@ -592,6 +645,18 @@ Because `last_signal` is not advanced while waiting, a month-end rebalance appro
 
 The browser adds two live checks: the terminal data's age (ok under 45 minutes, or under 3 days while NYSE is closed, because the refresh only runs in market hours) and the live feed's last tick (ok under 60 seconds, or anytime while NYSE is closed). A failing check is also listed under Alerts.
 
+### 17.9 Paper against backtest
+
+The test of whether live trading reproduces the research (`terminal.tracking_block`). A **shadow backtest** runs the strategy's current settings from the paper sleeve's first day (`run_backtest(..., start=day)`: first signal that day, then the normal calendar), with the backtest's costs. It is compared with the paper sleeve's daily returns from `state/equity.csv`:
+
+```math
+r^{\text{paper}}_t = \frac{(A_t - A_{t-1}) - (V^c_t - V^c_{t-1})}{A_{t-1} - V^c_{t-1}}
+```
+
+with $A$ the account equity and $V^c$ the crypto sleeve's NAV (§13.0). Measuring the change this way means that setting aside the crypto budget isn't counted as a loss. For rows from before the crypto column existed, $V^c$ takes its first recorded value. The crypto sleeve uses its own NAV, from its start date.
+
+Reported: the cumulative return of each, the gap, tracking error $\operatorname{sd}(r^{\text{paper}} - r^{\text{shadow}})\sqrt{A}$ (from 5 days) and correlation (from 20 days), next to the pass/fail rule in [LIVE_TRADING.md](LIVE_TRADING.md#before-real-money-a-passfail-rule): 126 trading days, correlation ≥ 0.9, average slippage within the assumed cost, and the edge test of §14. Until the next full rebalance the paper book still holds the old blend's stocks, so a gap is expected at first.
+
 ## References
 
 - Ang, A., Hodrick, R., Xing, Y. & Zhang, X. (2006). The cross-section of volatility and expected returns. *Journal of Finance* 61(1).
@@ -609,6 +674,8 @@ The browser adds two live checks: the terminal data's age (ok under 45 minutes, 
 - Lo, A. (2002). The statistics of Sharpe ratios. *Financial Analysts Journal* 58(4).
 - Lou, D. & Polk, C. (2022). Comomentum: inferring arbitrage activity from return correlations. *Review of Financial Studies* 35(7).
 - Menchero, J., Orr, D. & Wang, J. (2011). The Barra US equity model (USE4): methodology notes. MSCI.
+- Asness, C., Moskowitz, T. & Pedersen, L. (2013). Value and momentum everywhere. *Journal of Finance* 68(3).
 - Perold, A. (1988). The implementation shortfall: paper versus reality. *Journal of Portfolio Management* 14(3).
 - Liu, Y. & Tsyvinski, A. (2021). Risks and returns of cryptocurrency. *Review of Financial Studies* 34(6).
 - Moreira, A. & Muir, T. (2017). Volatility-managed portfolios. *Journal of Finance* 72(4).
+- Stellato, B., Banjac, G., Goulart, P., Bemporad, A. & Boyd, S. (2020). OSQP: an operator splitting solver for quadratic programs. *Mathematical Programming Computation* 12(4).

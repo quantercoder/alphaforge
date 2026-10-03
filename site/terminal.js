@@ -165,7 +165,7 @@ function lineSeries(chart, color, title) {
 
 function renderPerf() {
   const B = D.backtest, s = B.summary;
-  $("ptabs").innerHTML = [["growth", "Growth"], ["dd", "Drawdown"], ["attr", "Attribution"], ["sleeve", "Paper sleeve"], ["compare", "Compare"]].map(([k, l]) =>
+  $("ptabs").innerHTML = [["growth", "Growth"], ["dd", "Drawdown"], ["attr", "Attribution"], ["sleeve", "Paper vs backtest"], ["compare", "Compare"]].map(([k, l]) =>
     `<button aria-pressed="${k === ptab}" data-k="${k}">${l}</button>`).join("");
   $("ptabs").querySelectorAll("button").forEach((b) => b.onclick = () => { ptab = b.dataset.k; renderPerf(); });
   const el = $("pc"), names = Object.keys(B.lines);
@@ -174,20 +174,7 @@ function renderPerf() {
   $("pcompare").innerHTML = "";
   const kp = (rows) => $("kpis").innerHTML = rows.map(([a, b]) => `<div class="kpi"><div>${a}</div><div>${b}</div></div>`).join("");
   const bench = names[1];
-  if (ptab === "sleeve") {
-    const c = D.sleeve_curve, st = D.status, t = D.totals;
-    const first = c.curve[0], last = c.curve[c.curve.length - 1];
-    kp([["Sleeve NAV", money(st.nav)], ["Today", `<span class="${cls(t.day_pl)}">${smoney(t.day_pl)}</span>`],
-      ["Since start", first ? pct(last / first - 1) : "–"], ["Unrealized", `<span class="${cls(t.upl)}">${smoney(t.upl)}</span>`],
-      ["Drawdown", pct(st.drawdown)], ["Days", c.curve.length]]);
-    $("plegend").innerHTML = `<span><i style="background:${css("--amber")}"></i>${CRYPTO ? "Crypto" : "Equities"} sleeve NAV at each daily run</span>`;
-    if (c.curve.length < 2) { el.style.display = "none"; $("pcompare").innerHTML = `<p class="empty">The sleeve curve fills in after a few daily runs.</p>`; return; }
-    pChart = LightweightCharts.createChart(el, chartOpts(el));
-    pChart.addAreaSeries({ lineColor: css("--amber"), topColor: "rgba(255,159,28,.25)", bottomColor: "rgba(255,159,28,0)", lineWidth: 2 })
-      .setData(c.dates.map((d, i) => ({ time: d, value: c.curve[i] })));
-    pChart.timeScale().fitContent();
-    return;
-  }
+  if (ptab === "sleeve") return renderTracking(el, kp);
   if (ptab === "attr") return renderAttr(el, kp);
   kp([["CAGR", pct(s.CAGR, 1)], ["Sharpe", `${fmt(s.Sharpe)} <span class="mut">±${fmt(s["Sharpe SE"])}</span>`],
     ["Max DD", pct(s["Max Drawdown"], 1)], ["Vol", pct(s["Ann. Vol"], 1, false)], [`Beta (${bench.split(" ")[0]})`, fmt(s.Beta)],
@@ -220,6 +207,32 @@ function renderPerf() {
     });
   }
   pChart.timeScale().fitContent();
+}
+
+function renderTracking(el, kp) {
+  // Paper sleeve vs a shadow backtest started the same day: the test of whether the strategy survives live trading.
+  const T = D.tracking, st = D.status, sl = D.slippage, need = 126;
+  if (!T) { el.style.display = "none"; kp([["Sleeve NAV", money(st.nav)]]); $("plegend").innerHTML = "";
+    $("pcompare").innerHTML = `<p class="empty">Tracking starts with the sleeve's first trading run.</p>`; return; }
+  const gap = T.paper_ret - T.shadow_ret;
+  kp([["Paper", `<span class="${cls(T.paper_ret)}">${pct(T.paper_ret)}</span>`], ["Backtest", `<span class="${cls(T.shadow_ret)}">${pct(T.shadow_ret)}</span>`],
+    ["Gap", `<span class="${cls(gap)}">${pct(gap)}</span>`], ["Tracking error", T.te == null ? '<span class="mut">after 5 days</span>' : pct(T.te, 1, false)],
+    ["Correlation", T.corr == null ? '<span class="mut">after 20 days</span>' : fmt(T.corr)], ["Days", T.n]]);
+  $("plegend").innerHTML = `<span><i style="background:${css("--amber")}"></i>Paper sleeve</span><span><i style="background:${css("--blue")}"></i>Backtest, same start and settings</span><span>since ${T.start}, growth of 1</span>`;
+  if (T.dates.length >= 2) {
+    pChart = LightweightCharts.createChart(el, chartOpts(el));
+    lineSeries(pChart, css("--blue"), "Backtest").setData(T.dates.map((d, i) => ({ time: d, value: T.shadow[i] })));
+    lineSeries(pChart, css("--amber"), "Paper").setData(T.dates.map((d, i) => ({ time: d, value: T.paper[i] })));
+    pChart.timeScale().fitContent();
+  } else el.style.display = "none";
+  const rule = (ok, txt, ev) => `<tr><td>${dot(ok == null ? "warn" : ok ? "ok" : "fail", ok == null ? "not enough data yet" : ok ? "pass" : "fail")}</td><td class="l">${txt}</td><td class="wrap mut">${ev}</td></tr>`;
+  const assumed = st.cost_bps;
+  $("pcompare").innerHTML = `<div class="sub">Pass/fail rule before any real money (LIVE_TRADING.md)</div>${table(["", "Rule", "Now"], [
+    rule(T.n >= need ? true : null, `At least ${need} trading days (6 months)`, `${T.n} so far`),
+    rule(T.corr == null || T.n < need ? null : T.corr >= 0.9, "Daily returns correlate with the backtest at 0.9 or more", T.corr == null ? "needs 20 days" : fmt(T.corr)),
+    rule(sl.n ? sl.avg_bps <= assumed : null, `Average slippage within the ${assumed}bp the backtest assumes`, sl.n ? `${bps(sl.avg_bps)} over ${sl.n} fills` : "no fills measured"),
+    rule(false, "Beats equal weight of the same names by more than luck (RESEARCH.md §7)", "failed the pre-registered test: no demonstrated edge"),
+  ])}<p class="note">The backtest line runs the strategy's current settings from the paper book's first day, with the backtest's costs. The gap is fills, timing, rounding and cash; a growing gap means live trading doesn't reproduce the research.${CRYPTO ? "" : " The paper book still holds the old 4-factor portfolio until the next full rebalance, so expect a gap before then."}</p>`;
 }
 
 function renderAttr(el, kp) {
