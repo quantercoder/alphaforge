@@ -327,7 +327,7 @@ function tick() {
   const mins = ny.getHours() * 60 + ny.getMinutes(), wd = ny.getDay();
   const open = CRYPTO || (wd > 0 && wd < 6 && mins >= 570 && mins < 960);
   $("mkt").innerHTML = CRYPTO ? `<b class="open">Crypto 24/7</b>` : open ? `<b class="open">NYSE open</b>` : `<b class="closed">NYSE closed</b>`;
-  if (LIVE.status === "on") $("livebtn").textContent = open ? `LIVE · ${FEED.name}` : "LIVE · market closed";
+  if (LIVE.status === "on") $("livebtn").textContent = open ? `LIVE · ${FEED.name}${LIVE.backup ? " (backup)" : ""}` : "LIVE · market closed";
 }
 
 function loadSym(s) {
