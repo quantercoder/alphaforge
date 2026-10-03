@@ -41,7 +41,7 @@ const FKEYS = [["F1", "HELP"], ["F2", "MON"], ["F3", "GP"], ["F4", "PORT"], ["F5
 const SERIES = ["--amber", "--blue", "--aqua", "--violet"];
 
 function chartOpts(el) {
-  return { width: el.clientWidth, height: el.clientHeight,
+  return { autoSize: true,  // follows its panel's size (ResizeObserver), so late layout or window changes can't squash it
     layout: { background: { color: css("--panel") }, textColor: css("--dim"), fontFamily: css("--f"), fontSize: 11, attributionLogo: false },
     grid: { vertLines: { color: "#15100b" }, horzLines: { color: "#15100b" } },
     rightPriceScale: { borderColor: css("--rule") }, timeScale: { borderColor: css("--rule") },
@@ -446,9 +446,6 @@ document.addEventListener("keydown", (e) => {
   if (fk) { e.preventDefault(); return run(fk[1]); }
   const typing = ["INPUT", "TEXTAREA"].includes(document.activeElement.tagName) || document.querySelector("dialog[open]");
   if (!typing && e.key.length === 1 && /[a-z]/i.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) $("cmd").focus();
-});
-addEventListener("resize", () => {
-  for (const [c, el] of [[gpChart, $("gpc")], [pChart, $("pc")]]) if (c) c.applyOptions({ width: el.clientWidth });
 });
 
 // ---------------------------------------------------------------- live prices
