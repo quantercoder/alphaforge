@@ -674,6 +674,16 @@ setInterval(() => {
   if (book) { renderBook(); if (ptab === "sleeve") renderPerf(); }
 }, 500);
 
+// Re-fit a chart when its panel changes size (late layout, window resize, hidden tab): autoSize keeps the
+// old zoom, which leaves the data squeezed into a corner if the first fit happened at zero width.
+const refit = new ResizeObserver((entries) => {
+  for (const e of entries) {
+    const c = e.target.id === "gpc" ? gpChart : pChart;
+    if (c && e.contentRect.width > 0) c.timeScale().fitContent();
+  }
+});
+refit.observe($("gpc")); refit.observe($("pc"));
+
 addEventListener("hashchange", () => D && loadSym(decodeURIComponent(location.hash.slice(1)).toUpperCase()));
 
 // ---------------------------------------------------------------- data
