@@ -22,6 +22,10 @@ TEMPLATE = '''<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title}</title>
 <meta name="description" content="{desc}">
+<meta name="theme-color" content="#000000">
+<link rel="icon" href="{icon}.svg" type="image/svg+xml">
+<link rel="icon" href="favicon.ico" sizes="32x32">
+<link rel="apple-touch-icon" href="{touch}.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -111,7 +115,7 @@ TEMPLATE = '''<!doctype html>
 
 PAGES = {
     "index.html": dict(
-        title="AlphaForge Terminal", kind="equity", data="data.json", eq_cur=' aria-current="page"', cr_cur="",
+        title="AlphaForge Terminal", kind="equity", icon="favicon", touch="apple-touch-icon", data="data.json", eq_cur=' aria-current="page"', cr_cur="",
         desc="AlphaForge equities: multi-factor stock strategy with live paper book, signals, risk and research.",
         placeholder="Ticker or company (NVDA, apple), or a function: PORT, SIG, RISK, BT, HELP",
         strip_label="Markets", book_title="Equities book",
@@ -121,7 +125,7 @@ PAGES = {
         help_tickers="<code>NVDA</code> or <code>nvidia</code>: chart it and live track it",
         live_list=" · <code>LIVE LIST</code> tracked tickers", feed_sel=""),
     "crypto.html": dict(
-        title="AlphaForge Crypto", kind="crypto", data="crypto.json", eq_cur="", cr_cur=' aria-current="page"',
+        title="AlphaForge Crypto", kind="crypto", icon="favicon-crypto", touch="apple-touch-icon-crypto", data="crypto.json", eq_cur="", cr_cur=' aria-current="page"',
         desc="AlphaForge crypto: trend-following crypto sleeve with live paper book, signals, risk and research.",
         placeholder="Coin (BTC, ether, sol), or a function: PORT, SIG, RISK, BT, HELP",
         strip_label="Coins", book_title="Crypto book",
