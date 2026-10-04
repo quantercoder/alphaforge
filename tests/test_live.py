@@ -304,3 +304,15 @@ def test_average_cost_rebuilt_from_fills():
     fixed = repair_costs(pos, B())
     assert fixed["SOL/USD"]["avg_cost"] == 110.0 and fixed["SOL/USD"]["cost_source"] == "order history"
     assert fixed["ETH/USD"]["cost_source"] == "unknown" and fixed["ETH/USD"]["upl"] is None
+
+
+def test_daily_positions_snapshot(tmp_path, lc):
+    prices, _ = synthetic_prices(n_assets=12, n_days=400, seed=3)
+    state = str(tmp_path)
+    run(lc, prices.iloc[:-1], state)
+    run(lc, prices, state)
+    run(lc, prices, state)  # same-day rerun replaces, doesn't duplicate
+    snap = pd.read_csv(os.path.join(state, "positions.csv"))
+    day = snap[snap["date"] == str(prices.index[-1].date())]
+    assert len(day) == day["symbol"].nunique() > 0
+    assert (day["sleeve"] == "equity").all() and day["weight"].sum() <= 1.0 + 1e-6

@@ -332,6 +332,23 @@ def reconcile(broker, meta, days=3):
 
 # ---------------------------------------------------------------- the whole day
 
+def snapshot_positions(path, d, nv, px_all):
+    """One row per holding per trading day: what was held, at what price, and its weight in its sleeve.
+    A rerun on the same day replaces that day's rows."""
+    sleeve_nav = {"us_equity": nv["equity"], "crypto": nv.get("crypto") or nv["crypto_mv"]}
+    rows = []
+    for s, p in sorted(nv["positions"].items()):
+        last = p.get("last") or (float(px_all[s]) if s in px_all else None)
+        mv = p["qty"] * last if last else None
+        nav = sleeve_nav.get(p["cls"])
+        rows.append({"date": d, "symbol": s, "sleeve": "crypto" if p["cls"] == "crypto" else "equity", "qty": p["qty"],
+                     "price": round(last, 6) if last else None, "value": round(mv, 2) if mv is not None else None,
+                     "weight": round(mv / nav, 6) if mv is not None and nav else None})
+    old = pd.read_csv(path) if os.path.exists(path) else pd.DataFrame(columns=list(rows[0]) if rows else ["date"])
+    old = old[old["date"].astype(str) != d]
+    pd.concat([old, pd.DataFrame(rows)], ignore_index=True).to_csv(path, index=False)
+
+
 def _load_meta(path):
     meta = {}
     if os.path.exists(path):
@@ -384,6 +401,7 @@ def run(lc, prices, state_dir="state", broker=None, today=None, crypto_prices=No
     if "crypto" in after:
         curve.loc[d, "crypto"] = round(after["crypto"], 2)
     curve.sort_index().to_csv(eq_path, index_label="date")
+    snapshot_positions(f"{state_dir}/positions.csv", d, after, px_all)
     with open(f"{state_dir}/orders.jsonl", "a") as f:
         for fl in fills:
             f.write(json.dumps({"date": d, **fl}, default=float) + "\n")
