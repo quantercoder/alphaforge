@@ -77,8 +77,8 @@ TEMPLATE = '''<!doctype html>
 
 <nav class="fkeys" id="fkeys" aria-label="Functions"></nav>
 <p class="foot">{foot} Nothing here is investment advice.
-  <a href="https://github.com/z125081-Sam-Lam/alphaforge">Source</a> · <a href="https://github.com/z125081-Sam-Lam/alphaforge/blob/main/docs/MATH.md">Model</a> ·
-  <a href="https://github.com/z125081-Sam-Lam/alphaforge/blob/main/docs/RESEARCH.md">Research</a> ·
+  <a href="https://github.com/quantercoder/alphaforge">Source</a> · <a href="https://github.com/quantercoder/alphaforge/blob/main/docs/MATH.md">Model</a> ·
+  <a href="https://github.com/quantercoder/alphaforge/blob/main/docs/RESEARCH.md">Research</a> ·
   Charts by <a href="https://www.tradingview.com/lightweight-charts/">TradingView Lightweight Charts</a></p>
 
 <dialog id="livedlg">

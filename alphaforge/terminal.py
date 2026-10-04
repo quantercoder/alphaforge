@@ -275,7 +275,7 @@ LIMITS = {
                "max_te": 0.12, "drift": 1.2},
     "crypto": {"max_beta": 1.5, "var_pct": 0.08, "max_days_to_exit": 1.0, "vol_mult": 1.5, "drift": 1.2},
 }
-REPO = "https://github.com/z125081-Sam-Lam/alphaforge"
+REPO = "https://github.com/quantercoder/alphaforge"
 
 
 def _adv_usd(raw, syms, ysym, crypto, n=20):

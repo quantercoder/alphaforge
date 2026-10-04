@@ -26,7 +26,7 @@ const et = (iso) => {
 
 let D = null, sym = null, range = 130, ptab = "growth", mtab = "all", gpChart, pChart, gpSeries, gpBars = [];
 let rtab = "sum", btab = "pos", otab = "ord", stab = "scores", atab = "alerts";
-const REPO = "https://github.com/z125081-Sam-Lam/alphaforge";
+const REPO = "https://github.com/quantercoder/alphaforge";
 const FUNCS = {
   MON: ["mon", "Monitor: every ticker with price and change"], GP: ["gp", "Price chart of the selected ticker"],
   PORT: ["book", "Paper book: positions and live P&L"], BLTR: ["bltr", "Order blotter: orders, fills, slippage"],

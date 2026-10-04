@@ -1,6 +1,6 @@
 # AlphaForge
 
-**Terminal: [Equities](https://z125081-sam-lam.github.io/alphaforge/) · [Crypto](https://z125081-sam-lam.github.io/alphaforge/crypto.html)** · [Math model](docs/MATH.md) · [Research](docs/RESEARCH.md) · [Live trading](docs/LIVE_TRADING.md)
+**Terminal: [Equities](https://quantercoder.github.io/alphaforge/) · [Crypto](https://quantercoder.github.io/alphaforge/crypto.html)** · [Math model](docs/MATH.md) · [Research](docs/RESEARCH.md) · [Live trading](docs/LIVE_TRADING.md)
 
 A multi-factor equity strategy and a separate trend-following crypto strategy, with a Bloomberg-style web terminal, a paper/live trading job and a Streamlit research dashboard. It follows the workflow a systematic equity desk uses: cross-sectional factor signals, risk-aware portfolio construction, and a backtest with execution lag, weight drift and transaction costs. The backtest is tested for look-ahead bias.
 
