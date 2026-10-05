@@ -1,6 +1,7 @@
 name: terminal
 # Trades the paper account after each close, refreshes quotes during market hours,
 # and deploys the terminal to GitHub Pages. live.json decides the broker (sim by default).
+# GitHub can delay or drop scheduled runs; editing this file re-registers the schedule.
 on:
   schedule:
     - cron: "15 21 * * 1-5"       # trading run, after the US close (16:00 ET = 20:00/21:00 UTC)
