@@ -316,3 +316,13 @@ def test_daily_positions_snapshot(tmp_path, lc):
     day = snap[snap["date"] == str(prices.index[-1].date())]
     assert len(day) == day["symbol"].nunique() > 0
     assert (day["sleeve"] == "equity").all() and day["weight"].sum() <= 1.0 + 1e-6
+
+
+def test_equity_and_crypto_on_different_dates(tmp_path, lc):
+    """Monday: stocks have Monday's close, crypto stops at Sunday. pandas 3 used to crash joining them."""
+    prices, _ = synthetic_prices(n_assets=12, n_days=400, seed=3)
+    crypto = synthetic_prices(n_assets=3, n_days=400, seed=4)[0].rename(columns=lambda c: c + "/USD")
+    crypto.index = crypto.index - pd.Timedelta(days=1)
+    cfg = {**lc, "crypto": {**lc["crypto"], "enabled": True, "universe": list(crypto.columns), "max_data_age_days": 10_000}}
+    r = run(cfg, prices, str(tmp_path), crypto_prices=crypto)
+    assert "crypto" in r["navs"]

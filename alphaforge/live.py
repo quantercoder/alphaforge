@@ -378,7 +378,8 @@ def run(lc, prices, state_dir="state", broker=None, today=None, crypto_prices=No
             raise RuntimeError(f"{name}: latest price is {p.index[-1].date()}, older than "
                                f"{configs[name]['max_data_age_days']} days")
 
-    px_all = pd.concat([p.iloc[-1].dropna() for p in data.values()])
+    # rename(None): rows from different dates carry different names, which pandas 3 refuses to concat
+    px_all = pd.concat([p.iloc[-1].dropna().rename(None) for p in data.values()])
     d = str(prices.index[-1].date())
     nv = navs(broker, lc, meta, px_all, start="crypto" in data)
     fills, events, alerts = [], [], []

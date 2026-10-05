@@ -460,7 +460,7 @@ def build(raw, prices, bench, lc, broker, state_dir, site_dir, craw=None, cprice
     meta = _load_meta(f"{state_dir}/meta.json")
     px_all = prices.iloc[-1].dropna()
     if cprices is not None:
-        px_all = pd.concat([px_all, cprices.iloc[-1].dropna()])
+        px_all = pd.concat([px_all.rename(None), cprices.iloc[-1].dropna().rename(None)])  # different dates, see live.run
     nv = navs(broker, lc, meta, px_all)
     acct = broker.account() if hasattr(broker, "account") else {"equity": nv["account"], "cash": getattr(broker, "cash", None)}
     acct_curve = pd.Series(dict(broker.history()), dtype=float) if hasattr(broker, "history") else _curve(state_dir, "account")

@@ -245,8 +245,8 @@ def signal_ic(panels, prices, horizons=(1, 5, 21, 63), pooled=False, months=None
             fwd = prices.shift(-h) / prices - 1
             ok_rows = [r for r in rows if r + h < len(prices) and z.iloc[r].notna().sum() > 2]
             if pooled:
-                a = pd.concat([z.iloc[r] for r in ok_rows]).values
-                b = pd.concat([fwd.iloc[r] for r in ok_rows]).values
+                a = np.concatenate([z.iloc[r].values for r in ok_rows])
+                b = np.concatenate([fwd.iloc[r].values for r in ok_rows])
                 m = np.isfinite(a) & np.isfinite(b)
                 n = int(m.sum())
                 ic = pd.Series(a[m]).rank().corr(pd.Series(b[m]).rank()) if n > 10 else np.nan
