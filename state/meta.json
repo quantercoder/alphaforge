@@ -1,6 +1,32 @@
 {
- "last_signal": "2026-10-02",
- "pending": null,
- "high_water": 97529.52,
- "halted": false
+ "equity": {
+  "last_signal": "2026-10-02",
+  "pending": null,
+  "halted": false,
+  "high_water": 87699.27,
+  "drawdown": 0.0,
+  "nav": 87699.27
+ },
+ "crypto": {
+  "start": "2026-10-06T01:46:17+00:00",
+  "mv_at_start": 3680.80498888519,
+  "high_water": 10000.0,
+  "awaiting": null,
+  "last_signal": "2026-10-04",
+  "target": {
+   "BTC/USD": 0.126874,
+   "ETH/USD": 0.091717,
+   "SOL/USD": 0.087759,
+   "LTC/USD": 0.083814,
+   "LINK/USD": 0.070618,
+   "AVAX/USD": 0.061402,
+   "DOGE/USD": 0.072496,
+   "BCH/USD": 0.046368
+  },
+  "halted": false,
+  "drawdown": 0.0,
+  "nav": 10000.0
+ },
+ "alerted": [],
+ "last_run": "2026-10-06T01:46:18+00:00"
 }
