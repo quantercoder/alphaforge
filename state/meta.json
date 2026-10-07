@@ -3,9 +3,9 @@
   "last_signal": "2026-10-02",
   "pending": null,
   "halted": false,
-  "high_water": 87699.27,
+  "high_water": 87939.18019196654,
   "drawdown": 0.0,
-  "nav": 87699.27
+  "nav": 87939.18019196654
  },
  "crypto": {
   "start": "2026-10-06T01:46:17+00:00",
@@ -24,9 +24,9 @@
    "BCH/USD": 0.046368
   },
   "halted": false,
-  "drawdown": 0.0,
-  "nav": 10000.0
+  "drawdown": -0.0015080191966535539,
+  "nav": 9984.919808033465
  },
  "alerted": [],
- "last_run": "2026-10-06T01:46:18+00:00"
+ "last_run": "2026-10-07T00:41:48+00:00"
 }
