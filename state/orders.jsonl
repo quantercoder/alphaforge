@@ -23,3 +23,5 @@
 {"date": "2026-10-12", "symbol": "BCH/USD", "qty": 1.191709653, "price": 286.2465515136719, "fee": 0.0, "client_id": "af-cry-2026-10-11-rb-BCHUSD-0", "status": "pending_new", "id": "a9b0d40f-e9f6-4224-ac7f-56bc4324ffa1", "sleeve": "crypto"}
 {"date": "2026-10-12", "symbol": "LINK/USD", "qty": 37.795261088, "price": 13.338029861450195, "fee": 0.0, "client_id": "af-cry-2026-10-11-rb-LINKUSD-0", "status": "pending_new", "id": "ae493ef5-e5c6-437e-95d7-6a9cf0ad7d4c", "sleeve": "crypto"}
 {"date": "2026-10-12", "symbol": "LTC/USD", "qty": 9.26511741, "price": 64.59812927246094, "fee": 0.0, "client_id": "af-cry-2026-10-11-rb-LTCUSD-0", "status": "pending_new", "id": "3b0d1f85-f8b8-401e-9704-9669f3996231", "sleeve": "crypto"}
+{"date": "2026-10-16", "symbol": "BAC", "qty": -181.0, "price": 51.22999954223633, "fee": 0.0, "client_id": "af-equ-2026-10-16-sw-BAC-0", "status": "accepted", "id": "2807a390-763c-4d7c-aae1-e3879bdbfe98", "sleeve": "equity"}
+{"date": "2026-10-16", "symbol": "CVX", "qty": 41, "price": 224.99000549316406, "fee": 0.0, "client_id": "af-equ-2026-10-16-sw-CVX-0", "status": "accepted", "id": "56bd49cb-e9fe-4168-897a-0dd22e9c0af0", "sleeve": "equity"}
