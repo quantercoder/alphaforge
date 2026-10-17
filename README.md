@@ -99,7 +99,7 @@ These limits are deliberate. The engine is built so each one can be swapped in:
 - **Risk model**: the terminal has a Barra-style factor risk model for monitoring and attribution, and construction runs a constrained optimizer (sector, beta, turnover), but the optimizer uses the shrunk sample covariance, not the factor model, and the styles are price-based only. Production uses fundamental styles (value, quality, size) and the factor model inside the optimizer.
 - **Costs**: linear bps in the backtest. TCA on the terminal measures what fills actually cost (delay, impact, participation); production uses a square-root impact model scaled by ADV, plus borrow costs on shorts.
 - **Process**: an approval step, an audit trail and limits with traffic lights exist, but there is no independent risk team, model validation or compliance sign-off, which is the human layer real desks rely on.
-- **Execution**: `live.py` trades a simulator or Alpaca (paper or live) in two separated sleeves, with per-sleeve drawdown halts and kill switches, idempotent order ids, a stale-data guard, fat-finger limits and email alerts through failed GitHub runs. It doesn't manage intraday orders.
+- **Execution**: `live.py` trades a simulator or Alpaca (paper or live) in two separated sleeves, with per-sleeve drawdown halts and kill switches, idempotent order ids, a stale-data guard that fills late Yahoo closes from Alpaca's market data ([MATH.md §13.6](docs/MATH.md#136-data-freshness)), fat-finger limits and email alerts through failed GitHub runs. It doesn't manage intraday orders.
 - **Validation**: `research.py` runs factor ICs, a walk-forward over a 20-setting grid and deflated Sharpe ratios. A point-in-time universe is still missing.
 
 ## Tests
@@ -115,7 +115,7 @@ These limits are deliberate. The engine is built so each one can be swapped in:
 
 `tests/test_desk.py` checks the desk analytics and construction: the QP solver against a known answer, the optimizer's sector, beta and position limits and turnover penalty, that the optimized backtest has no look-ahead, the shadow backtest's start date, and that the crypto carve-out isn't counted as a loss. It also checks the desk analytics: risk shares (by factor group and by name) add up to 100% and total variance = factor + specific; attribution adds up exactly to the strategy's return; TCA splits slippage into delay and impact; traffic-light thresholds; and that the approval gate holds a rebalance across runs and releases it on approval.
 
-`tests/test_live.py` checks the trading job: the crypto sleeve's NAV ledger, that the stock strategy never sizes from or sells coins, that a crypto halt leaves stocks untouched, fractional crypto orders, idempotent retries, that stale-order cleanup never touches hand-placed orders, migration of old state, and the swap overlay end to end.
+`tests/test_live.py` checks the trading job, including the freshness check (exchange-calendar logic, filling a missing close from Alpaca with the IEX fallback, and the stale alert): the crypto sleeve's NAV ledger, that the stock strategy never sizes from or sells coins, that a crypto halt leaves stocks untouched, fractional crypto orders, idempotent retries, that stale-order cleanup never touches hand-placed orders, migration of old state, and the swap overlay end to end.
 
 CI runs on Python 3.11 and 3.12 on every push.
 

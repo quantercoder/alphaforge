@@ -450,6 +450,19 @@ The high-water mark is $H_t = \max_{s\le t} V_s$. The job flattens the book and 
 
 with $d_{\max}$ = `max_drawdown_halt` (20% equities, 50% crypto, set beyond each backtest's worst drawdown so normal swings don't trip it). Trading resumes only after a person deletes that file. The terminal shows how much of the distance to the halt has been used. Halts, rejected orders and broker cancellations are written to `alerts.txt`, and the GitHub job fails on them, which emails the repository owner. The job also halts on `ALPHAFORGE_KILL=1` (all sleeves) or `ALPHAFORGE_KILL=equity` / `crypto` (one sleeve), and it refuses to trade on prices older than `max_data_age_days`. Real-money trading needs both `"live_money": true` in `live.json` **and** `ALPHAFORGE_CONFIRM_LIVE=yes` in the environment.
 
+### 13.6 Data freshness
+
+The signal at date $\tau$ must use the close of $\tau$. Two delays break that in practice: GitHub starts the scheduled 21:15 UTC job anywhere from minutes to about five hours late, and Yahoo can publish a session's close hours after the bell. Before this check existed, several runs saw only the previous session (the latest date in the data was $\tau - 1$), traded on day-old prices, and skipped a row of the NAV history.
+
+With Alpaca as the broker, `live.fill_latest_closes` runs before any signal:
+
+1. **Expected session.** $\tau^\star$ = the latest date in Alpaca's market calendar (`/v2/calendar`, the exchange's real sessions, holidays and early closes) whose close time has passed in New York (`AlpacaBroker.last_close_date`). A run at 01:13 UTC is 21:13 in New York, so $\tau^\star$ is that day.
+2. **Observed session.** $\tau^{y}$ = the latest date with at least one close among the strategy's names, SPY and the watchlist in the Yahoo download.
+3. **Fill.** If $\tau^{y} < \tau^\star$, request daily bars for every session in $(\tau^{y}, \tau^\star]$ from Alpaca's market data (`/v2/stocks/bars`, consolidated SIP feed, falling back to IEX when the plan doesn't allow SIP), and write open, high, low, close and volume into those rows. Yahoo names map to Alpaca names by `-` → `.` (BRK-B → BRK.B). Bars are unadjusted; that's correct for the newest sessions, because split and dividend adjustments only rescale prices *before* an event, which Yahoo's history already carries.
+4. **Report.** If the data still ends before $\tau^\star$ (both sources behind, or Alpaca failed), the run trades on the latest prices it has and raises the alert "traded on stale prices", which fails the GitHub job and emails the owner. If the calendar call itself fails, the run continues on Yahoo's data and logs that freshness couldn't be checked.
+
+Stale data is reported rather than refused, because refusing could skip a month-end signal (§13.1 catches up only after two months). The hard guard remains: no trading at all when the latest close is older than `max_data_age_days`. The simulator has no market data source, so it skips the check.
+
 Optionally, every rebalance and swap can wait for a person's approval, and every trading run is written to an audit log ([§17.6](#176-approval-audit-permissions)).
 
 ## 14. Statistical caveats
@@ -633,7 +646,7 @@ Because `last_signal` is not advanced while waiting, a month-end rebalance appro
 
 | Check | Rule |
 |---|---|
-| Price history fresh | business days between the latest close and the expected one: 0 ok, 1 warn, more fail. Expected = today once NYSE has opened on a trading day, else the previous trading day; for crypto, yesterday (UTC), because today's bar is still forming |
+| Price history fresh | business days between the latest close and the expected one: 0 ok, 1 warn, more fail. Expected = today once NYSE has opened on a trading day, else the previous trading day; for crypto, yesterday (UTC), because today's bar is still forming. The trading job fills missing sessions itself first (§13.6), so a warning here means both data sources were behind |
 | Quotes complete | every shown symbol's last quote date equals the latest close, else warn with the laggards |
 | No missing prices | every strategy name has a finite price on the latest row, else fail |
 | No stale prices | no strategy name has an unchanged close for 6 rows, else warn |

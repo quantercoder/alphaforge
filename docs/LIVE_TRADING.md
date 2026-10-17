@@ -139,7 +139,10 @@ If any point fails, stay on paper. That decision is yours; this repository will 
 
 ## Known gaps
 
-- The trading calendar uses US federal holidays as a stand-in for NYSE holidays; the catch-up rule covers mismatches.
+- The trading calendar uses US federal holidays as a stand-in for NYSE holidays; the catch-up rule covers mismatches. The freshness check uses Alpaca's real exchange calendar, but the month-end and swap counting still use the federal approximation.
+- Missing sessions filled from Alpaca use its SIP feed, or IEX on the free plan. An IEX close can differ from the consolidated close by a few cents, and IEX volume is a small share of total volume.
+- The freshness check covers stocks only. Crypto uses complete UTC days from Yahoo, which haven't lagged in practice.
+- History written before the check (October 2026) lacks NAV rows for 9 and 13 October; trades and positions from those days are unaffected.
 - Simulator fills use the close plus fixed slippage, with no partial fills or market impact.
 - Reconciliation is by alert, not repair: rejected, canceled or expired orders raise an alert, and the next rebalance re-targets the book. There is no intraday retry.
 - The Alpaca account pays no interest on cash, while the backtest credits idle cash with the T-bill rate.
