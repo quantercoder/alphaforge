@@ -22,7 +22,7 @@ It runs against one of two brokers:
 For each sleeve:
 
 1. Downloads prices (equities from 2014, crypto from 2019; for crypto only complete UTC days).
-2. Refuses to trade if the latest close is older than `max_data_age_days`.
+2. **Freshness check (Alpaca only).** Asks Alpaca's market calendar for the latest NYSE close. Yahoo sometimes publishes a close hours late, and GitHub often starts the nightly job late, so that session can be missing. Missing sessions are then filled from Alpaca's daily bars (SIP, or IEX on the free plan). If they still can't be filled, the run trades on the latest prices it has and raises an alert. Separately, it refuses to trade at all if the latest close is older than `max_data_age_days`.
 3. Works out the sleeve's NAV and updates its high-water mark.
 4. **Halt check.** If the sleeve's NAV is more than `max_drawdown_halt` below its peak, the job flattens that sleeve and writes `state/KILL` (equities) or `state/KILL_CRYPTO`. It does the same whenever that file exists or `ALPHAFORGE_KILL` is `1` (all sleeves), `equity` or `crypto`.
 5. Simulator only: fills the orders queued yesterday at today's close.

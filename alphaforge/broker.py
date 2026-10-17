@@ -111,6 +111,7 @@ class AlpacaBroker:
     queues_orders = True
     PAPER = "https://paper-api.alpaca.markets"
     LIVE = "https://api.alpaca.markets"
+    DATA = "https://data.alpaca.markets"
 
     def __init__(self, key, secret, live=False):
         if not key or not secret:
@@ -120,7 +121,8 @@ class AlpacaBroker:
                         "Content-Type": "application/json"}
 
     def _req(self, method, path, body=None):
-        req = urllib.request.Request(self.base + path, method=method, headers=self.headers,
+        url = path if path.startswith("https://") else self.base + path  # market data lives on DATA
+        req = urllib.request.Request(url, method=method, headers=self.headers,
                                      data=None if body is None else json.dumps(body).encode())
         try:
             with urllib.request.urlopen(req, timeout=30) as r:
@@ -131,6 +133,37 @@ class AlpacaBroker:
 
     def equity(self, prices=None):
         return float(self._req("GET", "/v2/account")["equity"])
+
+    def last_close_date(self, now=None):
+        """Date of the latest NYSE session whose close has passed, from Alpaca's market calendar
+        (real exchange holidays and early closes, unlike the federal calendar)."""
+        from zoneinfo import ZoneInfo
+        now = (now or datetime.now(timezone.utc)).astimezone(ZoneInfo("America/New_York"))
+        start = (now.date().toordinal() - 14)
+        days = self._req("GET", f"/v2/calendar?start={datetime.fromordinal(start).date()}&end={now.date()}")
+        done = [d["date"] for d in days if f"{d['date']} {d['close']}" <= now.strftime("%Y-%m-%d %H:%M")]
+        return done[-1] if done else None
+
+    def daily_bars(self, symbols, start, end):
+        """Daily OHLCV per symbol between two dates: {symbol: {"YYYY-MM-DD": (o, h, l, c, v)}}.
+        Consolidated (SIP) bars; the free plan may only allow the IEX feed, so fall back to it."""
+        for feed in ("sip", "iex"):
+            out, token = {}, None
+            try:
+                while True:
+                    q = urllib.parse.urlencode({"symbols": ",".join(symbols), "timeframe": "1Day", "start": start,
+                                                "end": end, "adjustment": "raw", "feed": feed, "limit": 10000,
+                                                **({"page_token": token} if token else {})})
+                    r = self._req("GET", f"{self.DATA}/v2/stocks/bars?{q}")
+                    for sym, bars in (r.get("bars") or {}).items():
+                        out.setdefault(sym, {}).update({b["t"][:10]: (b["o"], b["h"], b["l"], b["c"], b["v"]) for b in bars})
+                    token = r.get("next_page_token")
+                    if not token:
+                        return out
+            except RuntimeError as e:
+                if feed == "iex" or "403" not in str(e):
+                    raise
+        return {}
 
     def positions(self):
         out = {}

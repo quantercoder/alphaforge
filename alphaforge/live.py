@@ -425,6 +425,41 @@ def run(lc, prices, state_dir="state", broker=None, today=None, crypto_prices=No
             "halted": any(meta[k].get("halted") for k in data), "alerts": alerts}
 
 
+def fill_latest_closes(raw, symbols, broker):
+    """Yahoo can publish a day's close hours late, and GitHub often runs the nightly job late too, so the
+    newest session can be missing. Fill any sessions missing at the end of `raw` for `symbols` (Yahoo
+    names) from the broker's daily bars, up to the latest close per the exchange calendar.
+    Returns (raw, message); the message says what was filled, or that prices are still stale."""
+    if not hasattr(broker, "daily_bars"):
+        return raw, None
+    try:
+        expected = broker.last_close_date()
+    except Exception as e:  # noqa: BLE001 - can't check freshness; carry on with Yahoo and say so
+        return raw, f"could not check price freshness (Alpaca calendar failed: {e})"
+    syms = [s for s in symbols if s in raw["Close"]]
+    have = raw["Close"][syms].dropna(how="all").index
+    if not expected or not len(have) or have[-1] >= pd.Timestamp(expected):
+        return raw, None
+    start = (have[-1] + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+    to_alpaca = {s: s.replace("-", ".") for s in syms}  # BRK-B -> BRK.B
+    try:
+        bars = broker.daily_bars(list(to_alpaca.values()), start, expected)
+    except Exception as e:  # noqa: BLE001 - a data outage must not stop the run; it is reported instead
+        return raw, f"prices stale: latest close {have[-1].date()}, expected {expected}; Alpaca bars failed ({e})"
+    raw = raw.copy()
+    filled = set()
+    for s, a in to_alpaca.items():
+        for day, (o, h, lo, c, v) in bars.get(a, {}).items():
+            for field, x in zip(("Open", "High", "Low", "Close", "Volume"), (o, h, lo, c, v)):
+                raw.loc[pd.Timestamp(day), (field, s)] = float(x)
+            filled.add(day)
+    raw = raw.sort_index()
+    latest = raw["Close"][syms].dropna(how="all").index[-1]
+    if latest < pd.Timestamp(expected):
+        return raw, f"prices stale: latest close {latest.date()}, expected {expected} (Yahoo and Alpaca both behind)"
+    return raw, f"filled {', '.join(sorted(filled))} from Alpaca daily bars (Yahoo was behind)"
+
+
 def load_crypto(lc, today=None):
     """Daily crypto closes (Alpaca pair columns) and raw OHLCV, complete UTC days only."""
     cc = lc["crypto"]
@@ -452,9 +487,12 @@ def main():
         # ~800 days: a year of charts plus a year of factor history for the risk model
         start = (pd.Timestamp.now() - pd.Timedelta(days=800)).strftime("%Y-%m-%d")
         raw = pd.concat([raw, download(extra, start)], axis=1)
+    broker = make_broker(lc, a.state)
+    raw, note = fill_latest_closes(raw, list(dict.fromkeys(lc["universe"] + ["SPY"] + list(lc["watchlist"]))), broker)
+    if note:
+        print(note)
     prices, bench = load_prices(lc["universe"], None, raw=raw)
     cprices, craw = load_crypto(lc) if lc["crypto"]["enabled"] else (None, None)
-    broker = make_broker(lc, a.state)
 
     alerts = []
     if not a.quotes_only:
@@ -463,6 +501,8 @@ def main():
         for fl in report["fills"]:
             print("  ", fl)
         alerts = report["alerts"]
+        if note and note.startswith("prices stale"):
+            alerts.append(f"equity: traded on stale prices: {note}")
 
     from . import terminal
     terminal.build(raw, prices, bench, lc, broker, a.state, a.site, craw=craw, cprices=cprices)

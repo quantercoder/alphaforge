@@ -326,3 +326,55 @@ def test_equity_and_crypto_on_different_dates(tmp_path, lc):
     cfg = {**lc, "crypto": {**lc["crypto"], "enabled": True, "universe": list(crypto.columns), "max_data_age_days": 10_000}}
     r = run(cfg, prices, str(tmp_path), crypto_prices=crypto)
     assert "crypto" in r["navs"]
+
+
+# ---------------------------------------------------------------- stale data
+
+class DataAlpaca(AlpacaBroker):
+    """Calendar and daily bars only. `bars` per feed; a feed missing from it answers 403."""
+
+    def __init__(self, bars):
+        super().__init__("k", "s")
+        self.bars, self.feeds = bars, []
+
+    def _req(self, method, path, body=None):
+        if path.startswith("/v2/calendar"):
+            return [{"date": d, "open": "09:30", "close": "16:00"} for d in ("2026-10-07", "2026-10-08", "2026-10-09")]
+        feed = path.split("feed=")[1].split("&")[0]
+        self.feeds.append(feed)
+        if feed not in self.bars:
+            raise RuntimeError(f"Alpaca GET {path} -> 403: subscription does not permit")
+        return {"bars": self.bars[feed], "next_page_token": None}
+
+
+def _raw(last="2026-10-07"):
+    idx = pd.bdate_range("2026-10-01", last)
+    cols = pd.MultiIndex.from_product([["Open", "High", "Low", "Close", "Volume"], ["AAPL", "BRK-B", "^GSPC"]])
+    return pd.DataFrame(100.0, index=idx, columns=cols)
+
+
+def test_last_close_uses_the_exchange_calendar():
+    from datetime import datetime, timezone
+    b = DataAlpaca({})
+    assert b.last_close_date(datetime(2026, 10, 9, 1, 13, tzinfo=timezone.utc)) == "2026-10-08"   # 21:13 New York
+    assert b.last_close_date(datetime(2026, 10, 8, 19, 0, tzinfo=timezone.utc)) == "2026-10-07"   # 15:00, still open
+
+
+def test_missing_close_is_filled_from_alpaca(monkeypatch):
+    from alphaforge.live import fill_latest_closes
+    bar = lambda c: [{"t": "2026-10-08T04:00:00Z", "o": c, "h": c, "l": c, "c": c, "v": 1000}]
+    b = DataAlpaca({"iex": {"AAPL": bar(111.0), "BRK.B": bar(222.0)}})  # no SIP on the free plan
+    monkeypatch.setattr(b, "last_close_date", lambda now=None: "2026-10-08")
+    raw, note = fill_latest_closes(_raw(), ["AAPL", "BRK-B", "MSFT"], b)
+    assert raw["Close"].loc["2026-10-08", "AAPL"] == 111.0 and raw["Close"].loc["2026-10-08", "BRK-B"] == 222.0
+    assert b.feeds == ["sip", "iex"] and note.startswith("filled 2026-10-08")
+    # Up to date: nothing to do.
+    assert fill_latest_closes(raw, ["AAPL"], b)[1] is None
+
+
+def test_still_stale_is_reported(monkeypatch):
+    from alphaforge.live import fill_latest_closes
+    b = DataAlpaca({"sip": {}})
+    monkeypatch.setattr(b, "last_close_date", lambda now=None: "2026-10-08")
+    _, note = fill_latest_closes(_raw(), ["AAPL"], b)
+    assert note.startswith("prices stale: latest close 2026-10-07")
