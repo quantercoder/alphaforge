@@ -1,11 +1,11 @@
 name: terminal
 # Trades the paper account after each close, refreshes quotes during market hours,
 # and deploys the terminal to GitHub Pages. live.json decides the broker (sim by default).
-# GitHub can delay or drop scheduled runs; editing this file re-registers the schedule.
+# GitHub can delay or drop scheduled runs. Scheduled runs are attributed to whoever last changed a cron line.
 on:
   schedule:
-    - cron: "15 21 * * 1-5"       # trading run, after the US close (16:00 ET = 20:00/21:00 UTC)
-    - cron: "*/30 13-20 * * 1-5"  # intraday quote refresh, no trading
+    - cron: "15 21 * * 1,2,3,4,5"       # trading run, after the US close (16:00 ET = 20:00/21:00 UTC)
+    - cron: "*/30 13-20 * * 1,2,3,4,5"  # intraday quote refresh, no trading
   push:
     branches: [main]
     paths: ["site/**", "alphaforge/**", "live.json"]
@@ -52,7 +52,7 @@ jobs:
           ALPHAFORGE_KILL: ${{ vars.ALPHAFORGE_KILL }}
           ALPHAFORGE_APPROVE: ${{ inputs.approve != 'none' && inputs.approve || '' }}
         run: |
-          if [ "${{ github.event.schedule }}" = "15 21 * * 1-5" ] || [ "${{ inputs.trade }}" = "true" ] || [ -n "$ALPHAFORGE_APPROVE" ]; then
+          if [ "${{ github.event.schedule }}" = "15 21 * * 1,2,3,4,5" ] || [ "${{ inputs.trade }}" = "true" ] || [ -n "$ALPHAFORGE_APPROVE" ]; then
             python -m alphaforge.live
           else
             python -m alphaforge.live --quotes-only
