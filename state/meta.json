@@ -4,8 +4,8 @@
   "pending": null,
   "halted": false,
   "high_water": 89323.78549545487,
-  "drawdown": -0.007108265274749281,
-  "nav": 88688.84833280837,
+  "drawdown": -0.007872180512462412,
+  "nav": 88620.61253197817,
   "awaiting": null,
   "last_swap": "2026-10-16"
  },
@@ -14,20 +14,17 @@
   "mv_at_start": 3680.80498888519,
   "high_water": 10000.0,
   "awaiting": null,
-  "last_signal": "2026-10-18",
+  "last_signal": "2026-10-25",
   "target": {
-   "BTC/USD": 0.147274,
-   "ETH/USD": 0.130496,
-   "SOL/USD": 0.098854,
-   "LTC/USD": 0.087924,
-   "LINK/USD": 0.079294,
-   "AVAX/USD": 0.063768,
-   "BCH/USD": 0.049414
+   "BTC/USD": 0.233877,
+   "LTC/USD": 0.185117,
+   "AVAX/USD": 0.12945,
+   "BCH/USD": 0.119776
   },
   "halted": false,
-  "drawdown": -0.08286783328083658,
-  "nav": 9171.321667191634
+  "drawdown": -0.09312425319781792,
+  "nav": 9068.75746802182
  },
  "alerted": [],
- "last_run": "2026-10-23T23:53:11+00:00"
+ "last_run": "2026-10-27T00:29:02+00:00"
 }
