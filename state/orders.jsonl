@@ -39,3 +39,5 @@
 {"date": "2026-10-26", "symbol": "AVAX/USD", "qty": 69.719034195, "price": 8.914212226867676, "fee": 0.0, "client_id": "af-cry-2026-10-25-rb-AVAXUSD-0", "status": "pending_new", "id": "c1c922ab-f9ee-4a02-9ce4-346ba75d87c4", "sleeve": "crypto"}
 {"date": "2026-10-26", "symbol": "BTC/USD", "qty": 0.009653226, "price": 80024.0078125, "fee": 0.0, "client_id": "af-cry-2026-10-25-rb-BTCUSD-0", "status": "pending_new", "id": "1e7ab7a9-bd9c-4d76-be18-163cca9d6b30", "sleeve": "crypto"}
 {"date": "2026-10-26", "symbol": "LTC/USD", "qty": 15.490863, "price": 56.6606559753418, "fee": 0.0, "client_id": "af-cry-2026-10-25-rb-LTCUSD-0", "status": "pending_new", "id": "eb731c8a-6fc9-4c1f-b8fd-f129d263752d", "sleeve": "crypto"}
+{"date": "2026-10-30", "symbol": "JPM", "qty": -29.0, "price": 337.14, "fee": 0.0, "client_id": "af-equ-2026-10-30-sw-JPM-0", "status": "accepted", "id": "8079b704-27c5-496c-a14f-7d71b72a08d2", "sleeve": "equity"}
+{"date": "2026-10-30", "symbol": "GOOGL", "qty": 34, "price": 279.9, "fee": 0.0, "client_id": "af-equ-2026-10-30-sw-GOOGL-0", "status": "accepted", "id": "9092504f-c1de-480a-bdd2-d1c06f6590dd", "sleeve": "equity"}
