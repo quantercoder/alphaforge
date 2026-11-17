@@ -51,3 +51,4 @@
 {"date": "2026-11-09", "symbol": "LTC/USD", "qty": -14.281378, "price": 50.0108528137207, "fee": 0.0, "client_id": "af-cry-2026-11-08-rb-LTCUSD-0", "status": "pending_new", "id": "c67cb9fc-e330-4f22-83f7-4a868570405f", "sleeve": "crypto"}
 {"date": "2026-11-09", "symbol": "LINK/USD", "qty": -60.770367315, "price": 10.385354995727539, "fee": 0.0, "client_id": "af-cry-2026-11-08-rb-LINKUSD-0", "status": "pending_new", "id": "a608a7a2-61f1-4a39-b0ee-0ed229f8832d", "sleeve": "crypto"}
 {"date": "2026-11-09", "symbol": "AVAX/USD", "qty": 268.533573, "price": 7.915886878967285, "fee": 0.0, "client_id": "af-cry-2026-11-08-rb-AVAXUSD-0", "status": "pending_new", "id": "69091de9-6a93-4cb6-9eb9-01b914378749", "sleeve": "crypto"}
+{"date": "2026-11-16", "symbol": "AVAX/USD", "qty": -332.893212067, "price": 7.297037124633789, "fee": 0.0, "client_id": "af-cry-2026-11-15-rb-AVAXUSD-0", "status": "pending_new", "id": "af86defe-c0fc-4e30-8f22-0e9a03d1f25f", "sleeve": "crypto"}
