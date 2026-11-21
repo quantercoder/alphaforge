@@ -477,6 +477,24 @@ def forecast_block(z, sigma, ic, horizon, meta):
     return {**meta, "ic": ic, "horizon": horizon, "rows": rows}
 
 
+def lab_summary(site_dir):
+    """Regime and warnings from the Lab (site/lab.json), shown on the terminal. Monitoring only: nothing
+    from the Lab changes a trade."""
+    path = os.path.join(site_dir, "lab.json")
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path) as f:
+            lab = json.load(f)
+        rg = lab["intel"]["regime"]
+        fhs = ((lab.get("risk") or {}).get("methods") or {}).get("Filtered historical (GARCH)")
+        return {"built": lab["built"], "regime": rg["label"], "vix": rg["vix"], "spy_vs_200d": rg["spy_vs_200d"],
+                "warnings": [a["text"] for a in lab.get("alerts", []) if a["level"] == "warn"],
+                "var_fhs": {lvl: {"var1": v["var1"], "es1": v["es1"]} for lvl, v in fhs.items()} if fhs else None}
+    except (OSError, KeyError, ValueError):
+        return None
+
+
 # ---------------------------------------------------------------- pages
 
 def build(raw, prices, bench, lc, broker, state_dir, site_dir, craw=None, cprices=None):
@@ -494,7 +512,11 @@ def build(raw, prices, bench, lc, broker, state_dir, site_dir, craw=None, cprice
                "dates": list(acct_curve.index.astype(str)), "curve": acct_curve.tolist()}
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
-    _write(f"{site_dir}/data.json", equity_page(raw, prices, bench, lc, broker, state_dir, meta, nv, account, now))
+    page = equity_page(raw, prices, bench, lc, broker, state_dir, meta, nv, account, now)
+    page["lab"] = lab_summary(site_dir)
+    if page["lab"]:
+        page["desk"]["alerts_now"] += [f"lab ({page['lab']['built'][:10]}): {a}" for a in page["lab"]["warnings"]]
+    _write(f"{site_dir}/data.json", page)
     if cprices is not None:
         _write(f"{site_dir}/crypto.json", crypto_page(craw, cprices, lc, broker, state_dir, meta, nv, account, now))
 

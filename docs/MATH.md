@@ -21,6 +21,7 @@ This document specifies every quantity the engine computes, in the order the cod
 15. [Parameter reference](#15-parameter-reference)
 16. [The crypto sleeve](#16-the-crypto-sleeve)
 17. [Desk analytics](#17-desk-analytics): factor risk model, attribution, stress, liquidity, limits, TCA, signal diagnostics, approval and audit, next-trade preview, data health, paper against backtest, forecasts
+18. [The Lab](#18-the-lab): multi-model forecasts, strategy lab, VaR methods, portfolio construction, leverage and sizing
 
 ---
 
@@ -733,23 +734,90 @@ where $z_i$ is the name's standardized score, $\sigma_i$ its volatility over the
 
 The forecasts are not used to trade. They describe what the signal implies, with its track record next to it.
 
+## 18. The Lab
+
+Code: `alphaforge/models.py`, `strategies.py`, `lab.py`; page `site/research.html`. Rules for its forecasting test: [PREREGISTRATION_4.md](PREREGISTRATION_4.md); results: [RESEARCH_4.md](RESEARCH_4.md). Every panel is tagged **DATA** (measured: prices, yields, breadth, positions) or **MODEL** (estimated: forecasts, VaR, regime, allocations). Nothing on the page is traded.
+
+### 18.1 Market forecasts (track A)
+
+Target: SPY's log return over $h \in \{5, 21, 63\}$ trading days, sampled weekly. Thirteen features known at the forecast date (past returns, distance from the 200-day average, realized and GARCH volatility, VIX and its change, term spread, credit, dollar, oil).
+
+**Models.** Historical mean (the benchmark); ARIMA$(p,1,0)$, an AR($p$) on daily log returns, $p \le 5$ by AIC, forecast by iterating $\hat r_{t+k} = c + \sum_{j=1}^{p}\phi_j \hat r_{t+k-j}$ and summing $k = 1..h$; ridge regression ($\lambda = 10$, standardized features); random forest (300 trees, depth 4); gradient-boosted trees (scikit-learn HistGradientBoosting, depth 3, learning rate 0.05, 200 rounds); a neural network (32-16 MLP, standardized inputs and target, early stopping); a momentum rule. **Ensemble:** the equal-weight average of the six non-benchmark models. Equal weights are deliberate: estimated combination weights usually do worse out of sample (the "forecast combination puzzle", Smith & Wallis 2009).
+
+**Purged walk-forward.** For each year $Y \ge 2014$, every model is fitted on the weeks $t$ whose target window ended before 1 January $Y$ ($t + h < $ cut-off), then forecasts every week of $Y$. A test checks that shocking all prices after a date leaves every earlier forecast unchanged.
+
+**Scoring.** With realized $y_t$, model forecast $f_t$ and historical-mean forecast $\bar y_t$:
+
+```math
+R^2_{\text{OOS}} = 1 - \frac{\sum_t (y_t - f_t)^2}{\sum_t (y_t - \bar y_t)^2},
+\qquad
+\text{DM} = \frac{\bar d}{\widehat{\text{se}}_{\text{NW}}(\bar d)},\; d_t = (y_t - \bar y_t)^2 - (y_t - f_t)^2
+```
+
+(Campbell & Thompson 2008; Diebold & Mariano 1995), with a Newey-West standard error at lag $\lceil h/5 \rceil$ because overlapping weekly targets are autocorrelated. The hit rate is the share of correct signs; its binomial test uses the number of non-overlapping forecasts. Because SPY mostly rises, the historical mean alone is right 58–74% of the time, so a hit rate above 50% is not evidence of skill.
+
+**Scenarios and intervals.** With the ensemble forecast $\mu$, the GARCH volatility over the horizon $\sigma_h$ (§9.6) and the standardized out-of-sample errors $z_t = (y_t - f_t)/\operatorname{sd}(y - f)$: bear, base and bull are $\mu + \sigma_h\, q_z(0.10)$, $\mu + \sigma_h\, q_z(0.50)$ and $\mu + \sigma_h\, q_z(0.90)$. The 95% interval uses $q_z(0.025)$ and $q_z(0.975)$. Using empirical error quantiles instead of a normal distribution keeps the fat tails; the page reports how often past outcomes fell inside the 80% interval.
+
+### 18.2 Stock forecasts (track B)
+
+Each point-in-time S&P 500 member at each month-end (pit.py), nine features rank-transformed to $[-1, 1]$ across members that month (Gu, Kelly & Xiu 2020): 12-1 and 6-1 momentum, 1-month reversal, 52-week-high ratio, volatility, 252-day beta, residual momentum, largest daily return, dollar volume. Target: next month's return minus the members' average, winsorized at the 1st and 99th percentiles for training. The same learners are refitted each January from 2016 on all earlier months, with the last month purged (its target ends after the cut-off; a test checks it). The ensemble averages the models' cross-sectional ranks. Today's one-month forecast per stock is Grinold's rule (§17.10) with the ensemble's out-of-sample IC and GARCH volatility. "Model agreement" is $1 - \operatorname{sd}(\text{model ranks}) / 0.29$, where 0.29 is the standard deviation of independent uniform ranks.
+
+### 18.3 Strategy lab
+
+Thirteen strategies, each net of costs (SPY 2 bp, stocks 7 bp per unit of turnover; 0.5% a year to borrow shares; T-bills + 1% to borrow cash), trading at the next close or the next month: buy-and-hold SPY; trend following (hold SPY above its 200-day average, else T-bills); volatility targeting ($w = \min(1.5, 0.15/\sigma^{\text{GARCH}})$; Moreira & Muir 2017); mean reversion (Connors RSI(2) below 10 above the 200-day average, sell above the 5-day average); on the point-in-time S&P 500, momentum long-only and market-neutral (top minus bottom 20%), short-term reversal long/short, low volatility, and a three-factor composite; pairs trading by the distance method (Gatev, Goetzmann & Rouwenhorst 2006: the 10 same-sector pairs with the smallest squared distance of normalized prices over 252 days, opened at 2 formation standard deviations, closed when the spread crosses zero or after 126 days); and the crypto sleeve against bitcoin.
+
+Reported: CAGR, volatility, Sharpe (excess of T-bills), Sortino, maximum drawdown, Calmar (CAGR ÷ |max drawdown|), win rate, skew, annual cost drag (gross minus net), Sharpe before and from 2020, and the probabilistic Sharpe ratio $\text{PSR} = \Phi\!\left(\widehat{SR}\sqrt{n-1}\,/\sqrt{1 - \gamma_3 \widehat{SR} + \tfrac{\gamma_4 - 1}{4}\widehat{SR}^2}\right)$ (Bailey & López de Prado 2012), the probability that the true per-period Sharpe exceeds zero given skew $\gamma_3$ and kurtosis $\gamma_4$.
+
+### 18.4 Risk of the paper book
+
+Today's equity weights $w$ applied to three years of returns give the book's return history $r^p$. One-day and ten-day VaR and Expected Shortfall at 95% and 99% by five methods:
+
+- **Historical:** empirical quantiles of the last two years (ten-day: overlapping ten-day sums).
+- **Parametric normal:** $\text{VaR}_\alpha = z_\alpha \sigma - \mu$, $\text{ES}_\alpha = \sigma\,\varphi(z_\alpha)/(1-\alpha) - \mu$.
+- **Cornish-Fisher:** $z_\alpha$ replaced by $z_\alpha + \tfrac{(z_\alpha^2 - 1)S}{6} + \tfrac{(z_\alpha^3 - 3z_\alpha)K}{24} - \tfrac{(2z_\alpha^3 - 5z_\alpha)S^2}{36}$ with skew $S$ and excess kurtosis $K$.
+- **Filtered historical simulation** (Barone-Adesi et al. 1999): fit GARCH(1,1) to $r^p$, standardize $\epsilon_t = r^p_t/\sqrt{h_t}$, and simulate by resampling $\epsilon$ through the GARCH recursion from today's $h_{T+1}$ (20,000 one-day draws; 5,000 ten-day paths). This keeps both the fat tails and today's volatility.
+- **Monte Carlo:** multivariate Student-t shocks (5 degrees of freedom, scaled to unit variance) with the 252-day correlation shrunk 30% toward the identity and each stock's one-day GARCH volatility; ten-day by $\sqrt{10}$.
+
+Also shown: skew, excess kurtosis, worst and best day, tail ratio $|q_{0.95}/q_{0.05}|$, beta and correlation to SPY, the three-year drawdown at today's weights, gross and net exposure, the ten-day filtered-historical P&L histogram and the correlation matrix. The terminal's Risk panel shows the filtered-historical 99% VaR and ES next to its simpler measures.
+
+### 18.5 Portfolio construction, leverage and sizing
+
+For the strategy's 30 stocks, with $\Sigma = D C D$ (GARCH volatilities, 252-day correlation shrunk 30%) and long-only weights capped at 10%: **equal weight**; **inverse volatility**; **minimum variance** $\min w^\top \Sigma w$; **maximum diversification** $\max \frac{w^\top \sigma}{\sqrt{w^\top \Sigma w}}$ (Choueifaty & Coignard 2008), solved as $\min x^\top \Sigma x$ s.t. $\sigma^\top x = 1$, $x \ge 0$, then $w = x / \mathbf 1^\top x$; **equal risk contribution** (Maillard, Roncalli & Teiletche 2010), by the fixed-point iteration $w_i \leftarrow w_i \sqrt{\overline{RC}/RC_i}$ with $RC_i = w_i (\Sigma w)_i$; and **mean-variance** $\max \alpha^\top w - \tfrac{\lambda}{2} w^\top \Sigma w$ ($\lambda = 5$) with the track-B forecasts as $\alpha$. The quadratic programs use the ADMM solver of §9.5, projected onto the capped simplex. Reported per method: forecast volatility, diversification ratio, effective names $1/\sum w_i^2$, the largest risk share, and a monthly walk-forward from 2016.
+
+**Leverage.** The live strategy's backtest returns at $L \in \{1, 1.5, 2, 3\}$: $r^L_t = L r_t - (L - 1)(r^f_t + 1\%/252)$. One-year loss probabilities come from 2,000 paths built from 21-day blocks of history (a block bootstrap keeps volatility clustering).
+
+**Kelly.** $f^* = \mu/\sigma^2 = SR/\sigma$ from the backtest, with half Kelly and the Kelly fraction at the lower 95% bound of the Sharpe ratio, $\max(0, SR - 1.96\,\text{SE})/\sigma$ with $\text{SE} = \sqrt{(1 + SR^2/2)/Y}$. Kelly is only as good as the mean it is given, and the fair-universe tests put the strategy's edge near zero, where Kelly is 0.
+
+### 18.6 Market intelligence and integrity
+
+**Regime** (a rule, not a fitted model): *Stress* if VIX is above VIX3M (an inverted volatility curve) or SPY's GARCH volatility is in its top 10% of ten years; *Risk-on* if SPY is above its 200-day average with volatility below its ten-year median; else *Neutral*. Macro indicators show their one-month change, z-score against one year ($(x - \bar x)/s$) and ten-year percentile. Breadth uses today's S&P 500 members. Unusual activity flags members whose move today exceeds three standard deviations of their prior 63 days, or whose volume does.
+
+**Not available, and not estimated:** institutional flows, point-in-time fundamentals, an economic-events calendar, options data, prices for about a quarter of former members, and deep learning (PyTorch adds about 800 MB per install; Gu, Kelly & Xiu 2020 find shallow networks do as well for return prediction). The page lists them instead of filling the gap.
+
 ## References
 
 - Ang, A., Hodrick, R., Xing, Y. & Zhang, X. (2006). The cross-section of volatility and expected returns. *Journal of Finance* 61(1).
 - Asness, C., Moskowitz, T. & Pedersen, L. (2013). Value and momentum everywhere. *Journal of Finance* 68(3).
+- Bailey, D. & López de Prado, M. (2012). The Sharpe ratio efficient frontier. *Journal of Risk* 15(2).
 - Bailey, D. & López de Prado, M. (2014). The deflated Sharpe ratio. *Journal of Portfolio Management* 40(5).
 - Baker, M., Bradley, B. & Wurgler, J. (2011). Benchmarks as limits to arbitrage: understanding the low-volatility anomaly. *Financial Analysts Journal* 67(1).
+- Barone-Adesi, G., Giannopoulos, K. & Vosper, L. (1999). VaR without correlations for portfolios of derivative securities. *Journal of Futures Markets* 19(5).
 - Blitz, D., Huij, J. & Martens, M. (2011). Residual momentum. *Journal of Empirical Finance* 18(3).
 - Bollerslev, T. (1986). Generalized autoregressive conditional heteroskedasticity. *Journal of Econometrics* 31(3).
 - Bollerslev, T. (1990). Modelling the coherence in short-run nominal exchange rates: a multivariate generalized ARCH model. *Review of Economics and Statistics* 72(3).
+- Campbell, J. & Thompson, S. (2008). Predicting excess stock returns out of sample. *Review of Financial Studies* 21(4).
+- Choueifaty, Y. & Coignard, Y. (2008). Toward maximum diversification. *Journal of Portfolio Management* 35(1).
 - Da, Z., Gurun, U. & Warachka, M. (2014). Frog in the pan: continuous information and momentum. *Review of Financial Studies* 27(7).
 - Daniel, K. & Moskowitz, T. (2016). Momentum crashes. *Journal of Financial Economics* 122(2).
 - DeMiguel, V., Garlappi, L. & Uppal, R. (2009). Optimal versus naive diversification. *Review of Financial Studies* 22(5).
+- Diebold, F. & Mariano, R. (1995). Comparing predictive accuracy. *Journal of Business & Economic Statistics* 13(3).
 - Engle, R. (1982). Autoregressive conditional heteroscedasticity with estimates of the variance of United Kingdom inflation. *Econometrica* 50(4).
 - Engle, R. & Mezrich, J. (1996). GARCH for groups. *Risk* 9(8).
 - Frazzini, A. & Pedersen, L. (2014). Betting against beta. *Journal of Financial Economics* 111(1).
+- Gatev, E., Goetzmann, W. & Rouwenhorst, K. G. (2006). Pairs trading: performance of a relative-value arbitrage rule. *Review of Financial Studies* 19(3).
 - George, T. & Hwang, C.-Y. (2004). The 52-week high and momentum investing. *Journal of Finance* 59(5).
 - Grinold, R. & Kahn, R. (2000). *Active Portfolio Management*, 2nd ed. McGraw-Hill.
+- Gu, S., Kelly, B. & Xiu, D. (2020). Empirical asset pricing via machine learning. *Review of Financial Studies* 33(5).
 - Hurst, B., Ooi, Y. H. & Pedersen, L. (2017). A century of evidence on trend-following investing. *Journal of Portfolio Management* 44(1).
 - Jegadeesh, N. & Titman, S. (1993). Returns to buying winners and selling losers. *Journal of Finance* 48(1).
 - Ledoit, O. & Wolf, M. (2004). Honey, I shrunk the sample covariance matrix. *Journal of Portfolio Management* 30(4).
@@ -757,9 +825,12 @@ The forecasts are not used to trade. They describe what the signal implies, with
 - Liu, Y. & Tsyvinski, A. (2021). Risks and returns of cryptocurrency. *Review of Financial Studies* 34(6).
 - Lo, A. (2002). The statistics of Sharpe ratios. *Financial Analysts Journal* 58(4).
 - Lou, D. & Polk, C. (2022). Comomentum: inferring arbitrage activity from return correlations. *Review of Financial Studies* 35(7).
+- López de Prado, M. (2018). *Advances in Financial Machine Learning*. Wiley.
+- Maillard, S., Roncalli, T. & Teiletche, J. (2010). The properties of equally weighted risk contribution portfolios. *Journal of Portfolio Management* 36(4).
 - Menchero, J., Orr, D. & Wang, J. (2011). The Barra US equity model (USE4): methodology notes. MSCI.
 - Moreira, A. & Muir, T. (2017). Volatility-managed portfolios. *Journal of Finance* 72(4).
 - Novy-Marx, R. & Velikov, M. (2016). A taxonomy of anomalies and their trading costs. *Review of Financial Studies* 29(1).
 - Patton, A. (2011). Volatility forecast comparison using imperfect volatility proxies. *Journal of Econometrics* 160(1).
 - Perold, A. (1988). The implementation shortfall: paper versus reality. *Journal of Portfolio Management* 14(3).
+- Smith, J. & Wallis, K. (2009). A simple explanation of the forecast combination puzzle. *Oxford Bulletin of Economics and Statistics* 71(3).
 - Stellato, B., Banjac, G., Goulart, P., Bemporad, A. & Boyd, S. (2020). OSQP: an operator splitting solver for quadratic programs. *Mathematical Programming Computation* 12(4).

@@ -170,3 +170,23 @@ dialog .row button:not(.go) { border: 1px solid var(--rule); padding: 5px 10px; 
   #mon, #book, #bltr, #sig, #mth, #pre, #dh, #aud { max-height: 480px; }
   .sugg li { grid-template-columns: 40px auto 1fr; } .sugg .q { display: none; }
 }
+
+/* Lab page */
+.labhead { display: flex; gap: 10px; align-items: baseline; color: var(--amber); }
+.tag { display: inline-block; font-size: 10px; font-weight: 600; padding: 0 4px; border: 1px solid currentColor; vertical-align: 1px; }
+.tag.d { color: var(--aqua); } .tag.m { color: var(--violet); }
+main.lab { grid-template-columns: minmax(0, 4fr) minmax(0, 4fr) minmax(0, 4fr);
+  grid-template-areas: "reg mac brd" "fcm fcm fcs" "stl stl rsk" "pfo pfo lev" "anm dq dq"; }
+main.lab > section { max-height: none; }
+#reg { grid-area: reg; } #mac { grid-area: mac; } #brd { grid-area: brd; } #fcm { grid-area: fcm; } #fcs { grid-area: fcs; }
+#stl { grid-area: stl; } #rsk { grid-area: rsk; } #pfo { grid-area: pfo; } #lev { grid-area: lev; } #anm { grid-area: anm; } #dq { grid-area: dq; }
+main.lab .body { max-height: 640px; }
+.ul { margin: 4px 0 8px; padding-left: 22px; color: var(--ink); }
+.ul li { margin: 2px 0; }
+@media (max-width: 1150px) {
+  main.lab { grid-template-columns: 1fr 1fr; grid-template-areas: "reg mac" "brd brd" "fcm fcm" "fcs fcs" "stl stl" "rsk rsk" "pfo lev" "anm anm" "dq dq"; }
+}
+@media (max-width: 700px) {
+  main.lab { grid-template-columns: 1fr; grid-template-areas: "reg" "mac" "brd" "fcm" "fcs" "stl" "rsk" "pfo" "lev" "anm" "dq"; }
+  .labhead .mut { display: none; }
+}

@@ -57,3 +57,13 @@ rules of test 2, with these changes: stability over 2016–19, 2020–22 and 202
 - Deep learning (LSTM, Transformer) is not in this test. PyTorch is about 800 MB per install, and the
   evidence for deep sequence models on daily returns is weak (Gu, Kelly & Xiu 2020 find shallow networks
   do as well as deep ones for return prediction). It can be added as its own pre-registered test.
+
+## Amendment (2026-11-21, after the first run)
+
+The first run's neural network diverged: out-of-sample R² of −1,696% (5 days), −669% (21 days) and −291%
+(63 days), with forecasts several times larger than any realized return. Cause: an implementation defect,
+not the model. The target (returns of about 0.01) was not standardized before training, which standard
+practice requires. The network now standardizes its target as well as its inputs. Because it is one of the
+six models averaged, the defect also dragged the first run's ensemble down (out-of-sample R² −46%, −19%,
+−6%). Both runs are reported in RESEARCH_4.md. A pass that appeared only after this fix would be treated as
+exploratory, not demonstrated.

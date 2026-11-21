@@ -517,6 +517,8 @@ function riskSummary() {
     <div class="rgrid">
       <div><span>Forecast vol</span>${pct(r.ex_ante_vol, 1, false)}</div><div><span>Realized vol</span>${pct(r.realized_vol, 1, false)}</div>
       <div><span>1d VaR 95% (normal)</span>${money(r.var95)}</div><div><span>1d VaR 95% (history)</span>${money(r.hvar95)}</div>
+      ${!CRYPTO && D.lab && D.lab.var_fhs ? `<div><span title="Filtered historical simulation with GARCH volatility, from the Lab">1d VaR 99% (GARCH, <a href="research.html">Lab</a>)</span>${money(D.lab.var_fhs["99"].var1 * nav)}</div>
+        <div><span>1d ES 99% (GARCH)</span>${money(D.lab.var_fhs["99"].es1 * nav)}</div>` : ""}
       <div><span>Beta</span>${fmt(r.beta)}</div><div><span>${esc(r.stress.label)}</span><b class="${cls(r.stress.pnl)}">${smoney(r.stress.pnl)}</b></div>
       <div><span>Gross</span>${pct(r.gross, 0, false)}</div><div><span>Net</span>${pct(r.net, 0, false)}</div>
     </div>
@@ -643,8 +645,10 @@ function renderStatus() {
   const st = D.status;
   $("asof").textContent = D.as_of;
   $("asof").title = `Data built ${D.generated_at}`;
-  $("mode").innerHTML = st.halted ? `<span class="badge halt">HALTED</span>`
-    : st.live_money ? `<span class="badge real">LIVE MONEY</span>` : `<span class="badge paper">PAPER · ${esc(st.broker.toUpperCase())}</span>`;
+  const lab = D.lab;
+  $("mkt").title = lab ? `Lab regime: ${lab.regime} (VIX ${lab.vix.toFixed(1)}, SPY ${pct(lab.spy_vs_200d)} vs 200-day), built ${lab.built.slice(0, 16)} UTC` : "";
+  $("mode").innerHTML = (lab ? `<a class="badge ${lab.regime === "Stress" ? "halt" : "paper"}" href="research.html" title="Market regime from the Lab">${esc(lab.regime)}</a> ` : "") + (st.halted ? `<span class="badge halt">HALTED</span>`
+    : st.live_money ? `<span class="badge real">LIVE MONEY</span>` : `<span class="badge paper">PAPER · ${esc(st.broker.toUpperCase())}</span>`);
   $("note").innerHTML = CRYPTO
     ? `Backtest from ${D.backtest.start} on today's ${D.universe.length} coins: survivorship-biased (coins that died aren't in it). Sharpe uses 365 days a year and no risk-free rate.`
     : `Backtest on today's ${D.universe.length} mega caps: survivorship-biased, read it as a ceiling. Cash earns T-bills${D.backtest.rf_avg != null ? ` (avg ${pct(D.backtest.rf_avg, 1, false)})` : ""}; Sharpe and alpha are excess of them.`;

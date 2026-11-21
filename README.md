@@ -69,6 +69,19 @@ prices ─▶ factors ─▶ z-score + winsorize ─▶ blended alpha ─▶ wei
 
 Every parameter (universe, mode, rebalance frequency, vol target, caps, costs, factor weights) is a sidebar control. If Yahoo is unreachable, the **Synthetic** source runs fully offline.
 
+## Lab
+
+`research.html`, the third page: an institutional-style research view built only from free data, every number tagged **DATA** (measured) or **MODEL** (estimated), nothing traded ([MATH.md §18](docs/MATH.md#18-the-lab)).
+
+- **Regime and macro:** a rule-based regime (trend, GARCH volatility percentile, VIX term structure), 11 macro and cross-asset indicators with z-scores and 10-year percentiles, S&P 500 breadth and sector ETFs, unusual moves and volume, upcoming earnings and headlines.
+- **Forecasts:** SPY over 1 week, 1 month and 3 months from 7 models (historical mean, ARIMA, ridge regression, random forest, gradient boosting, neural network, momentum rule) and their ensemble, with bull, base and bear scenarios, 95% intervals and each model's out-of-sample record. Stock forecasts come from an ML ensemble on the point-in-time S&P 500.
+- **Risk of the paper book:** VaR and Expected Shortfall by five methods (historical, normal, Cornish-Fisher, GARCH filtered historical, Student-t Monte Carlo), tail statistics, a 10-day P&L distribution and correlations.
+- **Strategy lab:** 13 strategies on equal terms (trend, momentum, mean reversion, low volatility, market-neutral, pairs trading, volatility targeting, multi-factor, crypto) with Sharpe, Sortino, Calmar, drawdowns, win rate, cost drag and the probabilistic Sharpe ratio.
+- **Portfolio construction:** equal weight, inverse volatility, minimum variance, maximum diversification, risk parity and mean-variance, with a walk-forward of each; leverage simulations and Kelly sizing with its uncertainty.
+- **Data integrity:** sources and timestamps, a list of what is unavailable and not estimated, and the bias controls.
+
+**Test 4 ([RESEARCH_4.md](docs/RESEARCH_4.md)):** none of the 7 models, nor their ensemble, forecasts SPY better than the historical mean out of sample, and the ML ensemble finds no edge in the point-in-time cross-section (IC −0.004).
+
 ## Honest results
 
 **Two pre-registered tests, no demonstrated edge.** On a fair, point-in-time S&P 500 (the index as it was each month since 2012, [RESEARCH_PIT.md](docs/RESEARCH_PIT.md)), momentum, residual momentum and the 52-week high all predict next month's returns no better than chance (rank IC $+0.003$, $0.000$, $-0.002$). Momentum's apparent skill on today's 30 mega caps (IC $+0.057$) was survivorship bias. A third test ([RESEARCH_3.md](docs/RESEARCH_3.md)) adopted **GARCH volatility forecasting**: better risk forecasts (QLIKE 0.47 → 0.37 out of sample) and a smaller worst drawdown in the backtest (−21.7% → −17.3%). It also showed that holding crypto through dips instead of selling makes things worse (Sharpe 0.92 → 0.69). The terminal's **Forecasts** panel (`FCST`) shows each stock's forecast with its range and this track record ([MATH.md §17.10](docs/MATH.md#1710-forecasts)).

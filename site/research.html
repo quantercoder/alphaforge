@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AlphaForge Lab</title>
+<meta name="description" content="AlphaForge research lab: market regime, multi-model forecasts with out-of-sample records, risk, strategy comparison and portfolio construction, every number labelled as data or model.">
+<meta name="theme-color" content="#000000">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="icon" href="favicon.ico" sizes="32x32">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="terminal.css?v=d4295f9ddc">
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js" integrity="sha384-OK7vELvjHdhUFi31JYioPIcRHTROLdcDa6ZsNWgvgLaKj+9JqhU0Ad8g4wz3CXjA" crossorigin="anonymous"></script>
+</head>
+<body>
+<header class="top">
+  <nav class="pages" aria-label="Pages">
+    <a href="index.html">Equities</a>
+    <a href="crypto.html">Crypto</a>
+    <a href="research.html" aria-current="page">Lab</a>
+  </nav>
+  <div class="labhead"><b>Research Lab</b> <span class="mut">regime · forecasts · risk · strategies · portfolio</span></div>
+  <div class="clock">
+    <span><span class="tag d">DATA</span> measured</span><span><span class="tag m">MODEL</span> estimated</span>
+    <span>Built <b id="built">loading</b></span>
+    <span>NY <b id="ny">--:--:--</b></span>
+  </div>
+</header>
+<div class="strip" id="lstrip" aria-label="Key readings"></div>
+<main class="lab">
+  <section class="p" id="reg"><h2><span>Regime &amp; alerts <span class="tag m">MODEL</span></span><small id="regdate"></small></h2><div class="body" id="regb"></div></section>
+  <section class="p" id="mac"><h2><span>Macro &amp; cross-asset <span class="tag d">DATA</span></span><small id="macdate"></small></h2><div class="body" id="macb"></div></section>
+  <section class="p" id="brd"><h2><span>Breadth &amp; sectors <span class="tag d">DATA</span></span><small id="brddate"></small></h2><div class="body" id="brdb"></div></section>
+  <section class="p" id="fcm"><h2><span>Market forecast: SPY, 7 models + ensemble <span class="tag m">MODEL</span></span><span class="tabs" id="htabs"></span></h2><div class="body" id="fcmb"></div><div class="chart" id="fcmc" style="height:200px"></div><p class="note" id="fcmnote"></p></section>
+  <section class="p" id="fcs"><h2><span>Stock forecasts: ML ensemble, S&amp;P 500 <span class="tag m">MODEL</span></span><span class="tabs" id="stabs"></span></h2><div class="body" id="fcsb"></div></section>
+  <section class="p" id="stl"><h2><span>Strategy lab, net of costs <span class="tag m">MODEL</span></span><small>click rows to chart them</small></h2>
+    <div class="legend" id="stlleg"></div><div class="chart" id="stlc" style="height:280px"></div><div class="body" id="stlb"></div></section>
+  <section class="p" id="rsk"><h2><span>Risk: your paper book <span class="tag m">MODEL</span></span><small id="rskdate"></small></h2><div class="body" id="rskb"></div></section>
+  <section class="p" id="pfo"><h2><span>Portfolio construction <span class="tag m">MODEL</span></span><span class="tabs" id="ptabs"></span></h2><div class="body" id="pfob"></div></section>
+  <section class="p" id="lev"><h2><span>Leverage &amp; position sizing <span class="tag m">MODEL</span></span></h2><div class="body" id="levb"></div></section>
+  <section class="p" id="anm"><h2><span>Unusual activity, earnings, news <span class="tag d">DATA</span></span></h2><div class="body" id="anmb"></div></section>
+  <section class="p" id="dq"><h2><span>Data integrity &amp; model transparency</span><small>sources, gaps, bias controls</small></h2><div class="body" id="dqb"></div></section>
+</main>
+<p class="foot">Research only: nothing on this page is traded, and nothing here is investment advice. Every forecast is shown with its out-of-sample record.
+  <a href="https://github.com/quantercoder/alphaforge/blob/main/docs/RESEARCH_4.md">Test 4 report</a> ·
+  <a href="https://github.com/quantercoder/alphaforge/blob/main/docs/MATH.md">Model</a> ·
+  Charts by <a href="https://www.tradingview.com/lightweight-charts/">TradingView Lightweight Charts</a></p>
+<script src="lab.js?v=6f09ae2b9f"></script>
+</body>
+</html>
