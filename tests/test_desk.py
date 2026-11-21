@@ -190,3 +190,34 @@ def test_garch_construction_stays_causal(setup):
     shocked = prices.copy()
     shocked.iloc[cut + 1:] *= np.random.default_rng(0).uniform(0.5, 1.5, shocked.iloc[cut + 1:].shape)
     pd.testing.assert_series_equal(base.returns.iloc[: cut + 1], run_backtest(shocked, cfg).returns.iloc[: cut + 1])
+
+
+# ---------------------------------------------------------------- test 5: maximum diversification
+
+def test_max_diversification_spreads_risk_and_respects_the_cap():
+    import numpy as np
+    from alphaforge.portfolio import max_div_weights
+    rng = np.random.default_rng(7)
+    idx = pd.bdate_range("2020-01-01", periods=800)
+    base = rng.normal(0, 0.01, (800, 6))
+    R = pd.DataFrame(base, index=idx, columns=list("ABCDEF"))
+    w = max_div_weights(R, list(R.columns), 1.0)
+    assert w.sum() == pytest.approx(1) and (w - 1 / 6).abs().max() < 0.05          # independent, alike: ~equal
+    R["F"] = R["E"] + rng.normal(0, 0.001, 800)                                     # F almost duplicates E
+    w = max_div_weights(R, list(R.columns), 1.0)
+    assert w["E"] + w["F"] < 2 / 6 - 0.05                                           # the duplicate pair is cut
+    w = max_div_weights(R, list(R.columns), 0.18)
+    assert w.max() <= 0.18 + 1e-6 and w.sum() == pytest.approx(1)
+
+
+def test_overlay_is_exact_at_full_scale_and_cash_at_zero(setup):
+    from alphaforge.test5 import apply_overlay
+    prices, _, res = setup
+    rf = pd.Series(0.0001, index=prices.index)
+    res = run_backtest(prices, Config(mode="long_only", target_vol=0.12, max_weight=0.1, max_leverage=1.0), None, rf)
+    r1, t1 = apply_overlay(res, pd.Series(1.0, index=prices.index), rf)
+    pd.testing.assert_series_equal(r1, res.returns, check_names=False)
+    first = res.weights.sum(axis=1).gt(0).idxmax()
+    r0, _ = apply_overlay(res, pd.Series(0.0, index=prices.index).where(prices.index > first, 1.0), rf)
+    after = r0.index[r0.index.get_loc(first) + 2:]
+    assert (r0[after] - 0.0001).abs().max() < 1e-12            # fully de-risked: only T-bills, no trading

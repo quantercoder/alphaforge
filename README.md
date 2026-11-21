@@ -80,6 +80,8 @@ Every parameter (universe, mode, rebalance frequency, vol target, caps, costs, f
 - **Portfolio construction:** equal weight, inverse volatility, minimum variance, maximum diversification, risk parity and mean-variance, with a walk-forward of each; leverage simulations and Kelly sizing with its uncertainty.
 - **Data integrity:** sources and timestamps, a list of what is unavailable and not estimated, and the bias controls.
 
+**Test 5 ([RESEARCH_5.md](docs/RESEARCH_5.md)):** three risk controls from the Lab (maximum diversification, a daily VaR limit, stress de-risking) were tested against the live strategy; none met all its pre-set rules, so nothing changed. Stress de-risking came closest: a smaller worst drawdown (−14% vs −18%) but 3 points less return a year and much more trading.
+
 **Test 4 ([RESEARCH_4.md](docs/RESEARCH_4.md)):** none of the 7 models, nor their ensemble, forecasts SPY better than the historical mean out of sample, and the ML ensemble finds no edge in the point-in-time cross-section (IC −0.004).
 
 ## Honest results

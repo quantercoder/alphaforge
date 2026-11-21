@@ -11,7 +11,7 @@ from .refdata import sector
 @dataclass
 class Config:
     model: str = "factors"            # factors | trend | equal  (what scores the assets)
-    mode: str = "long_short"          # long_short | long_only | trend | equal  (scores -> weights)
+    mode: str = "long_short"          # long_short | long_only | trend | equal | max_div  (scores -> weights)
     rebalance: str = "ME"             # pandas offset alias: ME, W-FRI, QE... (weekly ~3x turnover)
     execution_lag: int = 1            # days between signal close and trade close
     target_vol: float | None = 0.10   # annualized, ex-ante; None = no risk scaling
@@ -61,7 +61,7 @@ def rebalance_dates(index, freq, warmup):
 
 
 def constrained(cfg):
-    return cfg.mode in ("long_only", "trend") and bool(cfg.max_sector or cfg.max_beta or cfg.turnover_penalty)
+    return cfg.mode in ("long_only", "trend", "max_div") and bool(cfg.max_sector or cfg.max_beta or cfg.turnover_penalty)
 
 
 def targets_at(alpha, rets, i, cfg, w_now=None):
@@ -71,7 +71,8 @@ def targets_at(alpha, rets, i, cfg, w_now=None):
     w = portfolio.target_weights(alpha.iloc[i], hist, cfg.mode, cfg.max_weight, cfg.target_vol, cfg.max_leverage,
                                  w_now=w_now, hold_buffer=cfg.hold_buffer, trend_exit=cfg.trend_exit,
                                  vol_model=cfg.vol_model,
-                                 long_returns=rets.iloc[max(1, i - 755): i + 1] if cfg.vol_model == "garch" else None)
+                                 long_returns=rets.iloc[max(1, i - 755): i + 1]
+                                 if cfg.vol_model == "garch" or cfg.mode == "max_div" else None)
     if not constrained(cfg):
         return w
     return portfolio.optimize(w, hist, rets.iloc[max(1, i - 251): i + 1], cfg.max_weight, cfg.max_leverage,

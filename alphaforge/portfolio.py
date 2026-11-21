@@ -184,6 +184,33 @@ def optimize(target, hist, long_hist, max_weight, max_leverage, max_sector=None,
     return pd.Series(np.where(w > 1e-6, w, 0.0), index=names)
 
 
+def risk_model_cov(long_returns, names, shrink=0.3, horizon=21):
+    """Annualized covariance D C D: GARCH(1,1) volatilities (63-day sample where history is short) and the
+    252-day correlation shrunk toward the identity. Returns (cov, vols)."""
+    from .vol import garch_vol
+    R = long_returns.reindex(columns=names)
+    g = garch_vol(R, horizon).fillna(R.iloc[-63:].std()).fillna(R.std()).values * np.sqrt(252)
+    C = R.iloc[-252:].fillna(0).corr().fillna(0).values
+    C = (1 - shrink) * C + shrink * np.eye(len(names))
+    np.fill_diagonal(C, 1.0)
+    return g[:, None] * C * g[None, :], g
+
+
+def max_div_weights(long_returns, names, max_weight):
+    """Maximum diversification (Choueifaty & Coignard 2008): maximize w'sigma / sqrt(w'Sigma w), long-only, each
+    weight at most max_weight. Solved as min x'Sigma x s.t. sigma'x = 1, x >= 0, x_i <= max_weight * sum(x)
+    (linear), then w = x / sum(x)."""
+    S, g = risk_model_cov(long_returns, names)
+    n = len(names)
+    cap_rows = np.eye(n) - max_weight * np.ones((n, n))      # x_i - cap * sum(x) <= 0
+    A = np.vstack([np.eye(n), g[None, :], cap_rows])
+    lo = np.r_[np.zeros(n), 1.0, np.full(n, -np.inf)]
+    hi = np.r_[np.full(n, np.inf), 1.0, np.zeros(n)]
+    x = np.clip(solve_qp(2 * S, np.zeros(n), A, lo, hi), 0, None)
+    w = x / x.sum() if x.sum() > 0 else np.full(n, 1 / n)
+    return pd.Series(cap_weights(w, max_weight), index=names)
+
+
 def target_weights(alpha_row, hist_returns, mode, max_weight, target_vol, max_leverage,
                    cov_shrink=0.3, w_now=None, hold_buffer=None, trend_exit=None, vol_model="sample",
                    long_returns=None):
@@ -206,6 +233,11 @@ def target_weights(alpha_row, hist_returns, mode, max_weight, target_vol, max_le
             score[keep] = floor
         u = (score / vol).replace([np.inf, -np.inf], np.nan).fillna(0)
         w = u / u.sum() if u.sum() > 0 else u * 0
+    elif mode == "max_div":  # no forecast: every name with a score (i.e. with history) is eligible
+        names = list(alpha_row.dropna().index)
+        w = pd.Series(0.0, index=alpha_row.index)
+        if len(names) >= 2 and long_returns is not None:
+            w[names] = max_div_weights(long_returns, names, max_weight)
     else:
         w = alpha_to_weights(alpha_row, mode, held=held, hold_frac=hold_buffer)
     w = pd.Series(cap_weights(w.values, max_weight), index=w.index)
