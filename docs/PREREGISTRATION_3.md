@@ -55,3 +55,11 @@ live.
 None of these changes adds predictive power for returns. A pass means fewer trades, fewer sales into dips,
 or better risk forecasts at no measured cost. It does not mean an edge. Four more configurations are tried
 here (29 in the project so far).
+
+## Addendum (2026-11-21, before any run)
+
+C4 as written changes nothing: the trend score is the average sign of three returns, so it only takes the
+values −1, −1/3, +1/3 and +1, and "sell at −1/3 or below" is exactly today's rule (hold while the score is
+above 0). Corrected C4, before running it: **buy when the score is above 0; sell only when it reaches −1, that
+is, when all three lookbacks (20, 60 and 120 days) are negative.** A coin kept at −1/3 is sized as if its score
+were +1/3. The rules for C4 are unchanged.
