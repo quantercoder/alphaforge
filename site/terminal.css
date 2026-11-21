@@ -190,3 +190,11 @@ main.lab .body { max-height: 640px; }
   main.lab { grid-template-columns: 1fr; grid-template-areas: "reg" "mac" "brd" "fcm" "fcs" "stl" "rsk" "pfo" "lev" "anm" "dq"; }
   .labhead .mut { display: none; }
 }
+
+/* Multi-Asset page */
+main.lab.multi { grid-template-areas: "tgt tgt uni" "str str cri" "tst tst cri"; }
+#tgt { grid-area: tgt; } #uni { grid-area: uni; } #str { grid-area: str; } #cri { grid-area: cri; } #tst { grid-area: tst; }
+.slider { padding: 8px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; border-bottom: 1px solid var(--rule); }
+.slider input { flex: 1; min-width: 180px; accent-color: var(--amber); }
+@media (max-width: 1150px) { main.lab.multi { grid-template-areas: "tgt tgt" "uni uni" "str str" "cri cri" "tst tst"; } }
+@media (max-width: 700px) { main.lab.multi { grid-template-areas: "tgt" "uni" "str" "cri" "tst"; } }

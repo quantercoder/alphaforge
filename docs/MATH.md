@@ -22,6 +22,7 @@ This document specifies every quantity the engine computes, in the order the cod
 16. [The crypto sleeve](#16-the-crypto-sleeve)
 17. [Desk analytics](#17-desk-analytics): factor risk model, attribution, stress, liquidity, limits, TCA, signal diagnostics, approval and audit, next-trade preview, data health, paper against backtest, forecasts
 18. [The Lab](#18-the-lab): multi-model forecasts, strategy lab, VaR methods, portfolio construction, leverage and sizing
+19. [Multi-asset strategies and return targets](#19-multi-asset-strategies-and-return-targets)
 
 ---
 
@@ -799,6 +800,20 @@ For the strategy's 30 stocks, with $\Sigma = D C D$ (GARCH volatilities, 252-day
 **Regime** (a rule, not a fitted model): *Stress* if VIX is above VIX3M (an inverted volatility curve) or SPY's GARCH volatility is in its top 10% of ten years; *Risk-on* if SPY is above its 200-day average with volatility below its ten-year median; else *Neutral*. Macro indicators show their one-month change, z-score against one year ($(x - \bar x)/s$) and ten-year percentile. Breadth uses today's S&P 500 members. Unusual activity flags members whose move today exceeds three standard deviations of their prior 63 days, or whose volume does.
 
 **Not available, and not estimated:** institutional flows, point-in-time fundamentals, an economic-events calendar, options data, prices for about a quarter of former members, and deep learning (PyTorch adds about 800 MB per install; Gu, Kelly & Xiu 2020 find shallow networks do as well for return prediction). The page lists them instead of filling the gap.
+
+## 19. Multi-asset strategies and return targets
+
+Code: `alphaforge/multiasset.py`; page `site/multiasset.html`; rules [PREREGISTRATION_9.md](PREREGISTRATION_9.md); results [RESEARCH_9.md](RESEARCH_9.md).
+
+**Universe and simulation.** 16 ETFs: US stocks (SPY, IWM), international stocks (EFA, EEM), government bonds (SHY, IEF, TLT, TIP), credit (LQD, HYG), real assets (VNQ, GLD, SLV, DBC) and currencies (UUP, FXY). Each joins once it has 13 months of prices. `simulate` decides target weights at a month-end close and trades them at the next close; between rebalances the weights drift ($w_{t} = w_{t-1}(1 + r_t)/(1 + r^p_t)$), unallocated capital earns T-bills, and every trade pays 3 bp per unit of $\sum|\Delta w|$. Tests check that holding one asset reproduces its returns exactly.
+
+**Trend following (TSMOM, Moskowitz, Ooi & Pedersen 2012).** For each ETF, $s_i = \max\big(0, \tfrac14\sum_{m \in \{1,3,6,12\}} \operatorname{sign}(r_{i,m} - r^f_m)\big)$, where $r_{i,m}$ is its return over $m$ months. Raw weight $s_i \cdot 0.10/\sigma_i \,/\, N$, with $\sigma_i$ the GARCH volatility (§9.6) and $N$ the number of ETFs available; then the whole portfolio is scaled to 10% forecast volatility ($\Sigma = DCD$, 252-day correlation), with at most 25% per ETF and 100% in total (no borrowing, no shorting).
+
+**Comparison strategies.** Risk parity (equal risk contribution, §18.5, across SPY, EFA, EEM, IEF, TLT, TIP, GLD, DBC); dual momentum (Antonacci: SPY or EFA, whichever did better over 12 months, if SPY beat T-bills, else IEF); 60/40 (SPY/IEF); the permanent portfolio (25% each SPY, TLT, GLD, SHY); equal weight of all ETFs; buy-and-hold SPY.
+
+**Test 9 result: fail.** From 2005, trend following returned 5.1% a year at 7.2% volatility (Sharpe 0.48, maximum drawdown −15%), against SPY's 10.3% (Sharpe 0.52, −55%) and 60/40's 7.8% (Sharpe 0.59). It made money in the 2008 crisis (+10%) and in 2011, but lost in Q4 2018, the 2020 crash and 2022, so it met the crisis rule in only 2 of 5. It did diversify (monthly correlation with SPY 0.38), and half-and-half with SPY gave a Sharpe of 0.60 with a maximum drawdown of −29% instead of −55%, but rules 1 and 2 failed, so nothing trades. The permanent portfolio had the highest Sharpe ratio (0.69, drawdown −19%) at a return of 6.9% a year.
+
+**Return-target simulator.** Each base portfolio's daily returns are levered for $L \in \{0.5, 0.75, \dots, 3\}$: $r^L_t = L r_t - (L - 1) r^f_t - \max(L - 1, 0)\cdot 2\%/252$, so borrowing above 1× costs T-bills + 2% (a realistic retail margin rate) and below 1× the rest earns T-bills. For each level: CAGR, volatility, Sharpe, maximum drawdown, worst calendar year, and the share of all rolling 1-, 3- and 5-year windows (monthly steps) that ended with a loss. Given a target return, the page shows the smallest leverage that reached it historically for each base portfolio, or "never" if none up to 3× did. Leverage $L$ multiplies the arithmetic mean but the compound growth rate is approximately $L\mu - \tfrac12 L^2 \sigma^2$ minus the cost of borrowing, so beyond $L^\ast \approx \mu/\sigma^2$ more leverage lowers growth. With 22 years of data, no stock, bond or diversified portfolio reached 20% a year at any leverage up to 3×; only the crypto sleeve did (from 2019, eight surviving coins, worst drawdown about −40% to −48%).
 
 ## References
 

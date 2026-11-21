@@ -38,6 +38,7 @@ TEMPLATE = '''<!doctype html>
     <a href="index.html"{eq_cur}>Equities</a>
     <a href="crypto.html"{cr_cur}>Crypto</a>
     <a href="research.html">Lab</a>
+    <a href="multiasset.html">Multi-Asset</a>
   </nav>
   <form class="cmd" id="cmdform" autocomplete="off" role="search">
     <label for="cmd">CMD</label>
@@ -163,6 +164,7 @@ LAB = '''<!doctype html>
     <a href="index.html">Equities</a>
     <a href="crypto.html">Crypto</a>
     <a href="research.html" aria-current="page">Lab</a>
+    <a href="multiasset.html">Multi-Asset</a>
   </nav>
   <div class="labhead"><b>Research Lab</b> <span class="mut">regime · forecasts · risk · strategies · portfolio</span></div>
   <div class="clock">
@@ -195,9 +197,62 @@ LAB = '''<!doctype html>
 </html>
 '''
 
+MULTI = '''<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AlphaForge Multi-Asset</title>
+<meta name="description" content="AlphaForge multi-asset: 16 ETFs across stocks, bonds, credit, real assets and currencies, seven strategies with crisis returns, and a return-target simulator.">
+<meta name="theme-color" content="#000000">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="icon" href="favicon.ico" sizes="32x32">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="terminal.css?v={css_v}">
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js" integrity="sha384-OK7vELvjHdhUFi31JYioPIcRHTROLdcDa6ZsNWgvgLaKj+9JqhU0Ad8g4wz3CXjA" crossorigin="anonymous"></script>
+</head>
+<body>
+<header class="top">
+  <nav class="pages" aria-label="Pages">
+    <a href="index.html">Equities</a>
+    <a href="crypto.html">Crypto</a>
+    <a href="research.html">Lab</a>
+    <a href="multiasset.html" aria-current="page">Multi-Asset</a>
+  </nav>
+  <div class="labhead"><b>Multi-Asset</b> <span class="mut">16 ETFs · 7 strategies · crises · return targets</span></div>
+  <div class="clock">
+    <span><span class="tag d">DATA</span> measured</span><span><span class="tag m">MODEL</span> estimated</span>
+    <span>Built <b id="built">loading</b></span>
+    <span>NY <b id="ny">--:--:--</b></span>
+  </div>
+</header>
+<div class="strip" id="lstrip" aria-label="Key readings"></div>
+<main class="lab multi">
+  <section class="p" id="tgt"><h2><span>Return-target simulator <span class="tag m">MODEL</span></span><small>what a target return took, historically</small></h2><div class="body" id="tgtb"></div></section>
+  <section class="p" id="uni"><h2><span>Universe: 16 ETFs <span class="tag d">DATA</span></span><small id="unidate"></small></h2><div class="body" id="unib"></div></section>
+  <section class="p" id="str"><h2><span>Strategies, net of costs <span class="tag m">MODEL</span></span><small>click rows to chart them</small></h2>
+    <div class="legend" id="strleg"></div><div class="chart" id="strc" style="height:280px"></div><div class="body" id="strb"></div></section>
+  <section class="p" id="cri"><h2><span>Crisis returns <span class="tag m">MODEL</span></span></h2><div class="body" id="crib"></div></section>
+  <section class="p" id="tst"><h2><span>Pre-registered test 9 <span class="tag m">MODEL</span></span></h2><div class="body" id="tstb"></div></section>
+</main>
+<p class="foot">Research only: nothing on this page is traded, and nothing here is investment advice. Past returns, including leveraged ones, do not predict future returns.
+  <a href="https://github.com/quantercoder/alphaforge/blob/main/docs/RESEARCH_9.md">Test 9 report</a> ·
+  <a href="https://github.com/quantercoder/alphaforge/blob/main/docs/MATH.md">Model</a> ·
+  Charts by <a href="https://www.tradingview.com/lightweight-charts/">TradingView Lightweight Charts</a></p>
+<script src="multiasset.js?v={ma_v}"></script>
+</body>
+</html>
+'''
+
 for fname, v in PAGES.items():
     with open(os.path.join(SITE, fname), "w", encoding="utf-8", newline="\n") as f:
         f.write(TEMPLATE.format(**v, css_v=ver("terminal.css"), js_v=ver("terminal.js")))
+if os.path.exists(os.path.join(SITE, "multiasset.js")):
+    with open(os.path.join(SITE, "multiasset.html"), "w", encoding="utf-8", newline="\n") as f:
+        f.write(MULTI.format(css_v=ver("terminal.css"), ma_v=ver("multiasset.js")))
 if os.path.exists(os.path.join(SITE, "lab.js")):
     with open(os.path.join(SITE, "research.html"), "w", encoding="utf-8", newline="\n") as f:
         f.write(LAB.format(css_v=ver("terminal.css"), lab_v=ver("lab.js")))
