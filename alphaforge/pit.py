@@ -116,9 +116,10 @@ def high52(close, monthly):
 
 # ---------------------------------------------------------------- portfolio and statistics
 
-def simulate(signal, fwd, eligible):
+def simulate(signal, fwd, eligible, keep_frac=None, turnover=None):
     """Monthly long-only top-20% equal weight vs equal weight of all eligible members, with costs.
-    Returns (strategy, benchmark, monthly IC, top-half and bottom-half-by-liquidity active returns)."""
+    Returns (strategy, benchmark, monthly IC). keep_frac: a held stock stays while it ranks in that top
+    fraction (rank buffer). turnover: a list that receives the strategy's sum |dw| each month."""
     strat, bench, ic, w_s, w_b = [], [], [], None, None
     for t in signal.index:
         el = eligible.loc[t] & signal.loc[t].notna()
@@ -127,12 +128,20 @@ def simulate(signal, fwd, eligible):
             continue
         r = fwd.loc[t, names].fillna(0.0)  # priced at t, no price after: return unknown, counted as 0
         s = signal.loc[t, names]
-        top = s.rank(ascending=False) <= max(1, round(TOP * len(names)))
+        rank, n = s.rank(ascending=False), max(1, round(TOP * len(names)))
+        top = rank <= n
+        if keep_frac and w_s is not None:
+            held = [x for x in names if w_s.get(x, 0) > 0 and rank[x] <= keep_frac * len(names)]
+            held = sorted(held, key=lambda x: rank[x])[:n]
+            fill = [x for x in rank.sort_values().index if x not in held][: n - len(held)]
+            top = pd.Series(names.isin(held + fill), index=names)
         ws = pd.Series(np.where(top, 1 / top.sum(), 0.0), index=names)
         wb = pd.Series(1 / len(names), index=names)
         cs = (ws - (w_s.reindex(names).fillna(0) if w_s is not None else 0)).abs().sum() if w_s is not None else 1.0
         cb = (wb - (w_b.reindex(names).fillna(0) if w_b is not None else 0)).abs().sum() if w_b is not None else 1.0
         rs, rb = float(ws @ r), float(wb @ r)
+        if turnover is not None:
+            turnover.append(cs)
         strat.append((t, rs - cs * COST))
         bench.append((t, rb - cb * COST))
         ic.append((t, s.rank().corr(fwd.loc[t, names].rank()) if fwd.loc[t, names].notna().sum() > 20 else np.nan))
@@ -153,7 +162,7 @@ def prior_grid_irs():
     from .backtest import Config, run_backtest
     from .data import DEFAULT_UNIVERSE, download, load_prices as lp, risk_free
     from .live import load_config
-    base = {k: v for k, v in load_config(os.path.join(ROOT, "live.json"))["strategy"].items() if k not in research.OPTIMIZER_KEYS}
+    base = {k: v for k, v in load_config(os.path.join(ROOT, "live.json"))["strategy"].items() if k not in research.LATER_KEYS}
     raw = download(DEFAULT_UNIVERSE + ["SPY", "^IRX"], "2014-01-01")
     p30, bench = lp(DEFAULT_UNIVERSE, None, raw=raw)
     rf = risk_free(raw, 252).reindex(p30.index).fillna(0)

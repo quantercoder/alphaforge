@@ -635,7 +635,7 @@ function renderFc() {
     ${q ? `<div class="sub">Track record: average next-month return vs the average stock, by forecast group (2012 on)</div>
       ${table(["Lowest 20%", "2", "3", "4", "Highest 20%"], [`<tr>${q.map((v) => `<td class="${cls(v)}">${pct(v, 2)}</td>`).join("")}</tr>`])}
       <p class="note">If the forecasts worked, this row would climb from left to right. Flat means the ranking predicts nothing.</p>` : ""}
-    <p class="note">Forecast = IC × the ${CRYPTO ? "coin" : "stock"}'s volatility over the period × its standardized score (Grinold's rule). The range is that volatility, barely narrowed by the signal. Click a name to chart it. Not investment advice.</p>`;
+    <p class="note">Forecast = IC × the ${CRYPTO ? "coin" : "stock"}'s volatility over the period × its standardized score (Grinold's rule). The range is that volatility${F.vol_model ? `, forecast with ${esc(F.vol_model)}` : ""}, barely narrowed by the signal. Click a name to chart it. Not investment advice.</p>`;
   bindRows($("fcb"));
 }
 

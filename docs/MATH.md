@@ -280,6 +280,39 @@ It stops when the primal residual $\lVert\mathbf A\mathbf x - \mathbf z\rVert_\i
 
 **Effect** ([RESEARCH.md §8](RESEARCH.md#8-constrained-construction-optimizer)). Same Sharpe ratio; the worst sector weight on a trade day falls from 53% to 43% (every rebalance ends at or under 40%; the excess is drift on swap days); turnover falls from 5.7× to 3.6× a year. It controls where the risk sits. It doesn't create an edge.
 
+### 9.6 GARCH(1,1) volatility (live since November 2026)
+
+With `vol_model: "garch"` the volatility target of §9.2 uses forecast volatilities instead of the 63-day sample. Returns are close to unpredictable, but volatility clusters: a volatile day tends to be followed by another (Engle 1982). GARCH(1,1) (Bollerslev 1986) models the conditional variance $h_t$ of a stock's daily return $r_t$ (demeaned over the fitting window) as
+
+```math
+h_t = \omega + a\, r_{t-1}^2 + b\, h_{t-1}, \qquad \omega = s^2 (1 - a - b), \qquad a, b \ge 0,\; a + b < 1,
+```
+
+with **variance targeting** (Engle & Mezrich 1996): $s^2$ is the sample variance of the window, so the long-run variance equals it and only $a$ (reaction to news) and $b$ (persistence) are estimated. They maximize the Gaussian log-likelihood
+
+```math
+\ell(a, b) = -\tfrac12 \sum_t \left(\ln h_t + \frac{r_t^2}{h_t}\right), \qquad h_1 = s^2,
+```
+
+over a grid ($a \in \{0.01, \dots, 0.25\}$, $b \in \{0.60, \dots, 0.99\}$, step 0.01, $a + b < 0.999$), evaluated for all stocks at once (`vol.garch_fit`). A grid is exact to its step and can't fail to converge. A test checks that it recovers known parameters from simulated GARCH data to within 0.02–0.04.
+
+The forecast of the average daily variance over the next $H = 21$ days follows from the recursion's mean reversion:
+
+```math
+h_{T+k} = s^2 + (a+b)^{k-1}\,\big(h_{T+1} - s^2\big), \qquad \bar h_H = \frac1H \sum_{k=1}^{H} h_{T+k}.
+```
+
+Each stock is refitted at every rebalance on the prior 756 days (at least 500; otherwise the sample volatility is used). The covariance is the **constant-correlation** form (Bollerslev 1990): $\Sigma = D\,\tilde C\,D$ with $D = \operatorname{diag}(\sqrt{\bar h_H})$ and $\tilde C$ the 252-day sample correlation shrunk 30% toward the identity. It feeds §9.2's scaling; the optimizer (§9.5) still measures tracking error with the sample covariance.
+
+**Why it was adopted** ([RESEARCH_3.md](RESEARCH_3.md), rules pre-registered in [PREREGISTRATION_3.md](PREREGISTRATION_3.md)). Out of sample, 11,654 forecasts of 21-day variance on 101 stocks at every month-end from 2016, each GARCH fitted on the prior three years only:
+
+| | QLIKE | Mincer-Zarnowitz $R^2$ | 68% range coverage |
+|---|---|---|---|
+| 63-day sample | 0.473 | 0.13 | 67% |
+| GARCH(1,1) | 0.371 | 0.16 | 69% |
+
+GARCH had the lower QLIKE loss (Patton 2011) for 96% of the stocks. In the backtest, the book's realized volatility stayed closer to the 12% target (average gap 3.4% → 2.8%), the maximum drawdown fell from −21.7% to −17.3%, and the Sharpe ratio moved from 1.04 to 1.08 (within noise). This is better risk forecasting, not an edge in returns.
+
 ## 10. Timing and the no-look-ahead guarantee
 
 Let $\tau$ be a rebalance signal date: the last trading day of each `Config.rebalance` period, after warm-up. With execution lag $\ell = 1$ (`execution_lag`):
@@ -479,6 +512,13 @@ Optionally, every rebalance and swap can wait for a person's approval, and every
 
 **Pre-registration.** Picking a configuration after seeing results is the most common way to fool yourself. Before momentum only replaced the blend, the rules for calling its edge "demonstrated" were committed to git ([PREREGISTRATION.md](PREREGISTRATION.md)): positive IC, information ratio against equal weight with $t \ge 2$, a deflated probability of at least 95% counting all 22 configurations tried, positive in 3 of 4 sub-periods, positive on the S&P 100, and confirmation on survivorship-free data. It failed four of the five rules that can be run (IR $-0.34$, $t = -1.2$; deflated probability 1%). On this evidence the strategy isn't suitable for outside money.
 
+**Test 3: trading less into dips** ([PREREGISTRATION_3.md](PREREGISTRATION_3.md), [RESEARCH_3.md](RESEARCH_3.md)). Four changes, each judged against fixed rules (turnover down at least 15%, Sharpe within 0.05, maximum drawdown within 2 points; for GARCH, the forecasting rules of §9.6):
+
+- **No two-week swap:** sale days fell from 21 to 12 a year and the Sharpe ratio rose from 1.04 to 1.06, but turnover fell only 10%, so it missed the 15% bar. Not adopted; the swap stays.
+- **Rank buffer** (buy into the top 30%, keep while in the top 50%; `hold_buffer`): no effect on 30 names, because the optimizer already damps turnover. On the point-in-time S&P 500 it halved turnover (6.3× → 3.0× a year) at the same Sharpe. It had to pass on both, so not adopted.
+- **GARCH volatility:** passed every rule; adopted (§9.6).
+- **Crypto exit buffer** (sell a coin only when all three trend lookbacks are negative; `trend_exit`): failed every rule. Sharpe 0.92 → 0.69, maximum drawdown −48% → −56%. Holding through dips is exactly what trend-following is meant to avoid: its quick exits are its crash protection.
+
 **Test 2: a point-in-time universe** ([PREREGISTRATION_PIT.md](PREREGISTRATION_PIT.md), [RESEARCH_PIT.md](RESEARCH_PIT.md), `alphaforge/pit.py`). To remove the hindsight in "today's 30 winners", the second test uses the S&P 500 as it was at each month-end from 2012 (membership from the free `fja05680/sp500` list; 848 tickers, 645 priced by Yahoo, 84% of member-months covered). Three signals with outside evidence were registered in advance: 12-1 momentum, residual momentum (Blitz, Huij & Martens 2011) and the 52-week high (George & Hwang 2004). Each buys the top 20% each month against equal weight of all members. **None passed a single rule.** Momentum's monthly rank IC fell from $+0.057$ ($t = 2.2$) on the hindsight universe to $+0.003$ ($t = 0.2$) on the fair one: almost all of the earlier signal was survivorship bias. Residual momentum: IC $0.000$; 52-week high: $-0.002$. Information ratios against equal weight: $+0.05$, $+0.08$, $-0.26$, none with $|t| > 1$.
 
 **Upgrade path,** in order of value: complete prices for delisted stocks (Yahoo covers 84% of member-months; the rest needs a paid source such as Norgate, Sharadar or CRSP) → signals with independent evidence that this universe can't fake (fundamental value and quality, earnings revisions) → feeding the §17.1 factor model into the §9.5 optimizer in place of the sample covariance → square-root impact costs.
@@ -495,6 +535,8 @@ Optionally, every rebalance and swap can wait for a person's approval, and every
 | Factor weights $\lambda$ | 0.4 / 0.2 / 0.2 / 0.2 (live: 1 / 0 / 0 / 0, momentum only) | `Config.factor_weights` |
 | Sector cap $c_{\text{sec}}$ / beta cap $c_\beta$ | none (live: 40% / 1.2) | `Config.max_sector`, `max_beta` |
 | Turnover penalty $\tau$ | 0 (live: 0.001) | `Config.turnover_penalty` |
+| Volatility model | sample (live: GARCH(1,1), 756-day fit, 21-day horizon) | `Config.vol_model`, `vol.garch_vol` |
+| Rank buffer / crypto exit buffer | off (tested in RESEARCH_3, not adopted) | `Config.hold_buffer`, `Config.trend_exit` |
 | QP solver | ADMM, $\rho$ 0.5, $\sigma$ $10^{-6}$, relaxation 1.6, tolerance $10^{-8}$ | `portfolio.solve_qp` |
 | Long-only top fraction | 30% | `portfolio.alpha_to_weights` |
 | Covariance lookback $L$ | 63 days | `Config.cov_lookback` |
@@ -686,7 +728,7 @@ P(r_i > \bar r) = \Phi\!\left(\frac{\mathrm{IC}\, z_i}{\sqrt{1-\mathrm{IC}^2}}\r
 
 where $z_i$ is the name's standardized score, $\sigma_i$ its volatility over the horizon (daily standard deviation over the last 63 days for stocks or 60 for crypto, times $\sqrt{h}$), and IC the signal's measured information coefficient at that horizon. The rule follows from a regression of the next-period return on the score when both are roughly normal: the slope is $\mathrm{IC}\cdot\sigma_i$ per unit of $z$. The forecast is therefore only as good as the IC. With an IC near zero, every forecast is near zero and the range is the stock's normal move. That is the panel's point: it makes visible how little a signal knows.
 
-- **Stocks:** 12-1 momentum z-scored across the 100 or so names on the terminal, one-month horizon ($h = 21$), IC from the point-in-time test (`alphaforge/calibration.json`, written by `python -m alphaforge.pit`): $+0.003$, $t = 0.2$. The track-record row shows the average next-month return against the average stock for each fifth of the forecasts since 2012. A working forecast would climb from the lowest to the highest fifth; this one is flat.
+- **Stocks:** 12-1 momentum z-scored across the 100 or so names on the terminal, one-month horizon ($h = 21$), $\sigma_i$ from GARCH(1,1) (§9.6) with the 63-day sample as fallback, IC from the point-in-time test (`alphaforge/calibration.json`, written by `python -m alphaforge.pit`): $+0.003$, $t = 0.2$. The track-record row shows the average next-month return against the average stock for each fifth of the forecasts since 2012. A working forecast would climb from the lowest to the highest fifth; this one is flat.
 - **Crypto:** the trend score standardized against its own history across all coins (a time-series signal), one-week horizon, IC pooled over coins and month-ends (§17.5). It measures about $+0.11$ ($t \approx 2.9$), but on today's 8 surviving coins with no pre-registered test, so the panel marks it unproven.
 
 The forecasts are not used to trade. They describe what the signal implies, with its track record next to it.
@@ -694,24 +736,30 @@ The forecasts are not used to trade. They describe what the signal implies, with
 ## References
 
 - Ang, A., Hodrick, R., Xing, Y. & Zhang, X. (2006). The cross-section of volatility and expected returns. *Journal of Finance* 61(1).
-- Baker, M., Bradley, B. & Wurgler, J. (2011). Benchmarks as limits to arbitrage: understanding the low-volatility anomaly. *Financial Analysts Journal* 67(1).
+- Asness, C., Moskowitz, T. & Pedersen, L. (2013). Value and momentum everywhere. *Journal of Finance* 68(3).
 - Bailey, D. & López de Prado, M. (2014). The deflated Sharpe ratio. *Journal of Portfolio Management* 40(5).
+- Baker, M., Bradley, B. & Wurgler, J. (2011). Benchmarks as limits to arbitrage: understanding the low-volatility anomaly. *Financial Analysts Journal* 67(1).
+- Blitz, D., Huij, J. & Martens, M. (2011). Residual momentum. *Journal of Empirical Finance* 18(3).
+- Bollerslev, T. (1986). Generalized autoregressive conditional heteroskedasticity. *Journal of Econometrics* 31(3).
+- Bollerslev, T. (1990). Modelling the coherence in short-run nominal exchange rates: a multivariate generalized ARCH model. *Review of Economics and Statistics* 72(3).
 - Da, Z., Gurun, U. & Warachka, M. (2014). Frog in the pan: continuous information and momentum. *Review of Financial Studies* 27(7).
 - Daniel, K. & Moskowitz, T. (2016). Momentum crashes. *Journal of Financial Economics* 122(2).
 - DeMiguel, V., Garlappi, L. & Uppal, R. (2009). Optimal versus naive diversification. *Review of Financial Studies* 22(5).
+- Engle, R. (1982). Autoregressive conditional heteroscedasticity with estimates of the variance of United Kingdom inflation. *Econometrica* 50(4).
+- Engle, R. & Mezrich, J. (1996). GARCH for groups. *Risk* 9(8).
 - Frazzini, A. & Pedersen, L. (2014). Betting against beta. *Journal of Financial Economics* 111(1).
+- George, T. & Hwang, C.-Y. (2004). The 52-week high and momentum investing. *Journal of Finance* 59(5).
+- Grinold, R. & Kahn, R. (2000). *Active Portfolio Management*, 2nd ed. McGraw-Hill.
 - Hurst, B., Ooi, Y. H. & Pedersen, L. (2017). A century of evidence on trend-following investing. *Journal of Portfolio Management* 44(1).
 - Jegadeesh, N. & Titman, S. (1993). Returns to buying winners and selling losers. *Journal of Finance* 48(1).
 - Ledoit, O. & Wolf, M. (2004). Honey, I shrunk the sample covariance matrix. *Journal of Portfolio Management* 30(4).
 - Lehmann, B. (1990). Fads, martingales, and market efficiency. *Quarterly Journal of Economics* 105(1).
-- Blitz, D., Huij, J. & Martens, M. (2011). Residual momentum. *Journal of Empirical Finance* 18(3).
-- George, T. & Hwang, C.-Y. (2004). The 52-week high and momentum investing. *Journal of Finance* 59(5).
-- Grinold, R. & Kahn, R. (2000). *Active Portfolio Management*, 2nd ed. McGraw-Hill.
+- Liu, Y. & Tsyvinski, A. (2021). Risks and returns of cryptocurrency. *Review of Financial Studies* 34(6).
 - Lo, A. (2002). The statistics of Sharpe ratios. *Financial Analysts Journal* 58(4).
 - Lou, D. & Polk, C. (2022). Comomentum: inferring arbitrage activity from return correlations. *Review of Financial Studies* 35(7).
 - Menchero, J., Orr, D. & Wang, J. (2011). The Barra US equity model (USE4): methodology notes. MSCI.
-- Asness, C., Moskowitz, T. & Pedersen, L. (2013). Value and momentum everywhere. *Journal of Finance* 68(3).
-- Perold, A. (1988). The implementation shortfall: paper versus reality. *Journal of Portfolio Management* 14(3).
-- Liu, Y. & Tsyvinski, A. (2021). Risks and returns of cryptocurrency. *Review of Financial Studies* 34(6).
 - Moreira, A. & Muir, T. (2017). Volatility-managed portfolios. *Journal of Finance* 72(4).
+- Novy-Marx, R. & Velikov, M. (2016). A taxonomy of anomalies and their trading costs. *Review of Financial Studies* 29(1).
+- Patton, A. (2011). Volatility forecast comparison using imperfect volatility proxies. *Journal of Econometrics* 160(1).
+- Perold, A. (1988). The implementation shortfall: paper versus reality. *Journal of Portfolio Management* 14(3).
 - Stellato, B., Banjac, G., Goulart, P., Bemporad, A. & Boyd, S. (2020). OSQP: an operator splitting solver for quadratic programs. *Mathematical Programming Computation* 12(4).

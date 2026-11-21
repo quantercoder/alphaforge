@@ -29,6 +29,9 @@ class Config:
     max_sector: float | None = None   # sum of weights per sector
     max_beta: float | None = None     # beta to the equal-weighted universe
     turnover_penalty: float = 0.0     # per unit of turnover, in units of annual tracking variance
+    hold_buffer: float | None = None  # long-only: keep a held name while it ranks in this top fraction
+    trend_exit: float | None = None   # trend: keep a held asset until its score falls to this level
+    vol_model: str = "sample"         # sample | garch  (volatilities in the volatility target)
     factor_weights: dict = field(default_factory=lambda: {
         "momentum": 0.4, "reversal": 0.2, "low_vol": 0.2, "quality_trend": 0.2})
 
@@ -63,9 +66,12 @@ def constrained(cfg):
 
 def targets_at(alpha, rets, i, cfg, w_now=None):
     """Target weights from information at row i only. Shared by backtest and live trading.
-    `w_now` (today's weights) only matters for the optimizer's turnover penalty."""
+    `w_now` (today's weights) feeds the buffers and the optimizer's turnover penalty."""
     hist = rets.iloc[max(1, i - cfg.cov_lookback + 1): i + 1]
-    w = portfolio.target_weights(alpha.iloc[i], hist, cfg.mode, cfg.max_weight, cfg.target_vol, cfg.max_leverage)
+    w = portfolio.target_weights(alpha.iloc[i], hist, cfg.mode, cfg.max_weight, cfg.target_vol, cfg.max_leverage,
+                                 w_now=w_now, hold_buffer=cfg.hold_buffer, trend_exit=cfg.trend_exit,
+                                 vol_model=cfg.vol_model,
+                                 long_returns=rets.iloc[max(1, i - 755): i + 1] if cfg.vol_model == "garch" else None)
     if not constrained(cfg):
         return w
     return portfolio.optimize(w, hist, rets.iloc[max(1, i - 251): i + 1], cfg.max_weight, cfg.max_leverage,

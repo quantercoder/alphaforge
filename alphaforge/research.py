@@ -112,6 +112,8 @@ def walk_forward(prices, bench, rf, base, ew, first_test_year=2018):
 
 
 OPTIMIZER_KEYS = ("max_sector", "max_beta", "turnover_penalty")
+# Settings added after a test was registered; stripped so earlier tests rerun as they were registered.
+LATER_KEYS = OPTIMIZER_KEYS + ("vol_model", "hold_buffer", "trend_exit")
 EDGE_PERIODS = [(2015, 2017), (2018, 2020), (2021, 2023), (2024, 2026)]
 
 
@@ -123,7 +125,7 @@ def _ir(a):
 def edge_test(p30, p100, bench, rf, base, wf):
     """The pre-registered test in docs/PREREGISTRATION.md, rule by rule. Returns a dict for the report.
     The candidate is the configuration registered: live.json as it was then, without the optimizer."""
-    base = {k: v for k, v in base.items() if k not in OPTIMIZER_KEYS}
+    base = {k: v for k, v in base.items() if k not in LATER_KEYS}
     ic30 = factor_ic(p30, horizons=(21, 63))
     ic100 = factor_ic(p100, horizons=(63,))
     m, tq = ic30["momentum"]["ic"], ic30["quality_trend"]["ic"]
@@ -198,7 +200,7 @@ def main():
     t0 = metrics.first_trade(live)
     k = dict(cost_bps=live.config.cost_bps, slippage_bps=live.config.slippage_bps, warmup=live.config.warmup)
     ew = run_backtest(p30, Config(model="equal", mode="equal", target_vol=None, max_weight=1, max_leverage=1, **k), None, rf)
-    plain = {k: v for k, v in base.items() if k not in OPTIMIZER_KEYS}
+    plain = {k: v for k, v in base.items() if k not in LATER_KEYS}
     old = run_backtest(p30, Config(**{**plain, "factor_weights": PRESETS["default 40/20/20/20"]}), None, rf)
     noswap = run_backtest(p30, Config(**{**base, "swap_every": 0}), None, rf)
     rft = rf.loc[t0:]
@@ -291,7 +293,7 @@ def main():
 
     # 8. constrained construction
     from .refdata import sector
-    plain_cfg = {**{k: v for k, v in base.items() if k not in OPTIMIZER_KEYS}, "factor_weights": PRESETS["momentum only"]}
+    plain_cfg = {**{k: v for k, v in base.items() if k not in LATER_KEYS}, "factor_weights": PRESETS["momentum only"]}
     opt_cfg = {**plain_cfg, **{k: base.get(k) or d for k, d in zip(OPTIMIZER_KEYS, (0.40, 1.2, 0.001))}}
     rows = []
     for label, c in (("Momentum, simple construction", plain_cfg), ("Momentum, optimizer", opt_cfg)):

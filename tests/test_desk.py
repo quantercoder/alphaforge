@@ -139,3 +139,54 @@ def test_forecast_follows_grinolds_rule():
     assert a["hi"] - a["lo"] == pytest.approx(2 * 0.10 * (1 - 0.05 ** 2) ** 0.5)
     zero = forecast_block(z, sigma, 0.0, 21, {})                             # no skill: every forecast is 0, 50/50
     assert all(r["fc"] == 0 and r["p"] == 0.5 for r in zero["rows"])
+
+
+# ---------------------------------------------------------------- test 3: buffers and GARCH
+
+def test_rank_buffer_keeps_a_held_name_until_it_drops_out_of_the_buffer():
+    from alphaforge.portfolio import alpha_to_weights
+    a = pd.Series({f"S{i}": float(10 - i) for i in range(10)})        # S0 best ... S9 worst; top 30% = S0..S2
+    assert set(alpha_to_weights(a, "long_only").pipe(lambda w: w[w > 0]).index) == {"S0", "S1", "S2"}
+    w = alpha_to_weights(a, "long_only", held=["S4"], hold_frac=0.5)    # S4 ranks 5th: inside the top 50%
+    assert set(w[w > 0].index) == {"S4", "S0", "S1"}
+    w = alpha_to_weights(a, "long_only", held=["S7"], hold_frac=0.5)    # S7 ranks 8th: sold
+    assert set(w[w > 0].index) == {"S0", "S1", "S2"}
+
+
+def test_trend_exit_buffer_keeps_a_coin_through_one_dip():
+    import numpy as np
+    from alphaforge.portfolio import target_weights
+    idx = pd.bdate_range("2024-01-01", periods=80)
+    rets = pd.DataFrame(np.random.default_rng(0).normal(0, 0.02, (80, 3)), index=idx, columns=["A", "B", "C"])
+    score = pd.Series({"A": 1.0, "B": -1 / 3, "C": -1.0})
+    now = pd.Series({"B": 0.3, "C": 0.3})
+    base = target_weights(score, rets, "trend", 1.0, None, 1.0, w_now=now)
+    buf = target_weights(score, rets, "trend", 1.0, None, 1.0, w_now=now, trend_exit=-1.0)
+    assert base["B"] == 0 and buf["B"] > 0                  # one lookback negative: kept with the buffer
+    assert buf["C"] == 0                                     # all three negative: sold either way
+
+
+def test_garch_recovers_parameters_and_beats_nothing_in_hindsight():
+    import numpy as np
+    from alphaforge.vol import garch_fit, garch_forecast, qlike
+    rng = np.random.default_rng(0)
+    a, b, s2, T = 0.08, 0.88, 1e-4, 2500
+    r, h = np.zeros(T), s2
+    for t in range(T):
+        r[t] = np.sqrt(h) * rng.standard_normal()
+        h = s2 * (1 - a - b) + a * r[t] ** 2 + b * h
+    f = garch_fit(r[:, None])
+    assert abs(f["a"][0] - a) <= 0.03 and abs(f["b"][0] - b) <= 0.04
+    assert garch_forecast(f, 5000)[0] == pytest.approx(f["s2"][0], rel=0.05)   # long run -> sample variance
+    assert qlike(np.array([2.0]), np.array([2.0]))[0] == 0
+
+
+def test_garch_construction_stays_causal(setup):
+    import numpy as np
+    prices, _, _ = setup
+    cfg = Config(mode="long_only", target_vol=0.12, max_weight=0.1, max_leverage=1.0, vol_model="garch", hold_buffer=0.5)
+    base = run_backtest(prices, cfg)
+    cut = 600
+    shocked = prices.copy()
+    shocked.iloc[cut + 1:] *= np.random.default_rng(0).uniform(0.5, 1.5, shocked.iloc[cut + 1:].shape)
+    pd.testing.assert_series_equal(base.returns.iloc[: cut + 1], run_backtest(shocked, cfg).returns.iloc[: cut + 1])

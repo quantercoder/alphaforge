@@ -506,11 +506,17 @@ def equity_forecast(mp, horizon=21):
         return None
     with open(CALIBRATION) as f:
         cal = json.load(f)
+    from .vol import garch_vol
     z = signals.cs_zscore(signals.momentum(mp)).iloc[-1]
-    sigma = mp.pct_change().iloc[-63:].std() * math.sqrt(horizon)
+    rets = mp.pct_change(fill_method=None)
+    # GARCH(1,1) beat the 63-day sample out of sample for 96% of these stocks (RESEARCH_3.md); the sample
+    # is the fallback for a stock without enough history.
+    daily = garch_vol(rets, horizon).fillna(rets.iloc[-63:].std())
+    sigma = daily * math.sqrt(horizon)
     return forecast_block(z, sigma, cal["ic_mean"], horizon, {
         "signal": cal["signal"], "ic_t": cal["ic_t"], "hit_rate": cal["hit_rate"], "months": cal["months"],
         "quintiles": cal["quintile_excess"], "verdict": cal["verdict"], "source": "point-in-time S&P 500, 2012 on",
+        "vol_model": "GARCH(1,1)",
         "unit": "next month vs the average stock"})
 
 

@@ -73,7 +73,7 @@ GitHub may delay scheduled runs by several minutes at busy times, and pauses sch
   "strategy": {"mode": "long_only", "target_vol": 0.12, "max_weight": 0.1, "max_leverage": 1.0,
                "swap_every": 10, "swap_count": 2,
                "factor_weights": {"momentum": 1.0, "reversal": 0.0, "low_vol": 0.0, "quality_trend": 0.0},
-               "max_sector": 0.4, "max_beta": 1.2, "turnover_penalty": 0.001},
+               "max_sector": 0.4, "max_beta": 1.2, "turnover_penalty": 0.001, "vol_model": "garch"},
   "min_trade_notional": 200,
   "max_order_notional": 25000,
   "max_drawdown_halt": 0.2,
@@ -85,7 +85,7 @@ GitHub may delay scheduled runs by several minutes at busy times, and pauses sch
 
 `watchlist` (optional, defaults to the S&P 100) lists extra tickers the terminal shows. It doesn't change what the strategy trades; that's `universe`. Use Yahoo symbols, for example `BRK-B`.
 
-`factor_weights` is momentum only since October 2026: the four-factor blend had no predictive power because low volatility predicts backwards on these names ([MATH.md §5](MATH.md#5-alpha-blending)). `max_sector`, `max_beta` and `turnover_penalty` switch on the optimizer: each rebalance is the portfolio closest to the simple target with every sector at or under 40%, beta at or under 1.2, and small trades skipped ([MATH.md §9.5](MATH.md#95-constrained-construction-optimizer)). Swaps also refuse to add to a full sector. Remove the three keys to go back to the simple construction.
+`factor_weights` is momentum only since October 2026: the four-factor blend had no predictive power because low volatility predicts backwards on these names ([MATH.md §5](MATH.md#5-alpha-blending)). `max_sector`, `max_beta` and `turnover_penalty` switch on the optimizer: each rebalance is the portfolio closest to the simple target with every sector at or under 40%, beta at or under 1.2, and small trades skipped ([MATH.md §9.5](MATH.md#95-constrained-construction-optimizer)). Swaps also refuse to add to a full sector. Remove the three keys to go back to the simple construction. `vol_model: "garch"` forecasts each stock's volatility with GARCH(1,1) for the volatility target ([MATH.md §9.6](MATH.md#96-garch11-volatility-live-since-november-2026)); remove it to use the 63-day sample. `hold_buffer` and the crypto `trend_exit` exist but are off: they failed the pre-registered test ([RESEARCH_3.md](RESEARCH_3.md)).
 
 `strategy` accepts any `backtest.Config` field, so whatever you test in the dashboard can be run live unchanged. Keep `long_only` unless your broker account allows short selling.
 

@@ -24,11 +24,13 @@ def cap_weights(w, max_weight, iters=20):
     return w
 
 
-def alpha_to_weights(alpha, mode="long_short", top_frac=0.3):
+def alpha_to_weights(alpha, mode="long_short", top_frac=0.3, held=(), hold_frac=None):
     """Unit-gross weights from a cross-sectional alpha vector (NaN = untradeable).
 
     long_short: dollar-neutral, weights proportional to demeaned alpha.
-    long_only:  top `top_frac` of names, weights proportional to alpha rank.
+    long_only:  top `top_frac` of names, weights proportional to alpha rank. With `hold_frac`, a name
+                already `held` stays while it ranks in the top `hold_frac` (a rank buffer), and the
+                remaining slots go to the best-ranked names not held.
     """
     a = alpha.dropna()
     w = pd.Series(0.0, index=alpha.index)
@@ -41,7 +43,13 @@ def alpha_to_weights(alpha, mode="long_short", top_frac=0.3):
         w[a.index] = 1 / len(a)
     elif mode == "long_only":
         n = max(1, int(round(len(a) * top_frac)))
-        top = a.nlargest(n).rank()
+        pick = a.nlargest(n).index
+        if hold_frac and len(held):
+            rank = a.rank(ascending=False)
+            keep = [s for s in held if s in rank.index and rank[s] <= hold_frac * len(a)]
+            keep = sorted(keep, key=lambda s: rank[s])[:n]
+            pick = keep + [s for s in a.sort_values(ascending=False).index if s not in keep][: n - len(keep)]
+        top = a[pick].rank()
         w[top.index] = top / top.sum()
     else:
         raise ValueError(f"Unknown mode: {mode}")
@@ -177,21 +185,43 @@ def optimize(target, hist, long_hist, max_weight, max_leverage, max_sector=None,
 
 
 def target_weights(alpha_row, hist_returns, mode, max_weight, target_vol, max_leverage,
-                   cov_shrink=0.3):
-    """Full pipeline for one rebalance date. `hist_returns` must end at the signal date."""
+                   cov_shrink=0.3, w_now=None, hold_buffer=None, trend_exit=None, vol_model="sample",
+                   long_returns=None):
+    """Full pipeline for one rebalance date. `hist_returns` must end at the signal date.
+
+    w_now: today's weights (for the buffers). hold_buffer: long-only rank buffer (see alpha_to_weights).
+    trend_exit: trend mode keeps a held asset until its score falls to this level (default: sell at <= 0).
+    vol_model "garch": volatilities from GARCH(1,1) on `long_returns` (3 years) with the 252-day
+    correlation, instead of the sample covariance of `hist_returns`."""
+    held = [] if w_now is None else [s for s, v in w_now.items() if v > 1e-9]
     if mode == "trend":
         # Long only in up-trending assets, sized by inverse volatility (risk parity across trends).
         vol = hist_returns.std().reindex(alpha_row.index)
-        u = (alpha_row.clip(lower=0) / vol).replace([np.inf, -np.inf], np.nan).fillna(0)
+        score = alpha_row.clip(lower=0)
+        if trend_exit is not None and held:
+            # Hysteresis: a held asset stays (sized as the smallest positive score) until its score
+            # reaches trend_exit.
+            floor = alpha_row[alpha_row > 0].min() if (alpha_row > 0).any() else 1 / 3
+            keep = [s for s in held if s in alpha_row.index and alpha_row[s] > trend_exit and alpha_row[s] <= 0]
+            score[keep] = floor
+        u = (score / vol).replace([np.inf, -np.inf], np.nan).fillna(0)
         w = u / u.sum() if u.sum() > 0 else u * 0
     else:
-        w = alpha_to_weights(alpha_row, mode)
+        w = alpha_to_weights(alpha_row, mode, held=held, hold_frac=hold_buffer)
     w = pd.Series(cap_weights(w.values, max_weight), index=w.index)
     if target_vol is None:  # no risk scaling (equal-weight benchmark)
         return w.clip(-max_weight, max_weight)
     sample = hist_returns.fillna(0).cov().values
     # Shrink toward diagonal: sample covariance on ~63 days x 30 names is noisy.
     cov = (1 - cov_shrink) * sample + cov_shrink * np.diag(np.diag(sample))
+    if vol_model == "garch" and long_returns is not None:
+        from .vol import garch_vol
+        g = garch_vol(long_returns.reindex(columns=w.index), horizon=21).values
+        sd = np.where(np.isfinite(g), g, np.sqrt(np.diag(sample)))   # no 2-year history: sample vol
+        corr = long_returns.iloc[-252:].reindex(columns=w.index).fillna(0).corr().fillna(0).values
+        corr = (1 - cov_shrink) * corr + cov_shrink * np.eye(len(sd))
+        np.fill_diagonal(corr, 1.0)
+        cov = sd[:, None] * corr * sd[None, :]
     scaled = vol_target(w.values, cov, target_vol, max_leverage)
     # Hard NAV-relative limit after leverage; may nudge vol slightly under target.
     return pd.Series(np.clip(scaled, -max_weight, max_weight), index=w.index)

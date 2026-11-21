@@ -51,6 +51,7 @@ prices ─▶ factors ─▶ z-score + winsorize ─▶ blended alpha ─▶ wei
 | **Normalization** | Cross-sectional z-score per day, winsorized at ±3σ, weighted blend re-standardized | `signals.py` |
 | **Construction** | Dollar-neutral L/S (demeaned alpha) or long-only (top 30%, rank-weighted) | `portfolio.py` |
 | **Risk** | Position cap with excess redistributed, ex-ante vol targeting on a shrunk 63-day covariance, gross leverage cap, hard per-name NAV limit | `portfolio.py` |
+| **Volatility model** | GARCH(1,1) per stock by maximum likelihood, constant-correlation covariance; beat the 63-day sample out of sample for 96% of stocks | `vol.py` |
 | **Optimizer** | Closest portfolio to the target with sector ≤ 40%, beta ≤ 1.2 and a turnover penalty; a dependency-free QP solver (ADMM, as in OSQP) | `portfolio.optimize`, `solve_qp` |
 | **Execution** | Signal at close *t*, trade at close *t+1*. Weights drift with prices between rebalances, and costs (commission + slippage bps) are charged on the actual trade from drifted holdings | `backtest.py` |
 | **Live** | Month-end signal from the same code path, whole-share order sizing, sells before buys, sim or Alpaca broker, drawdown halt | `live.py`, `broker.py` |
@@ -70,7 +71,7 @@ Every parameter (universe, mode, rebalance frequency, vol target, caps, costs, f
 
 ## Honest results
 
-**Two pre-registered tests, no demonstrated edge.** On a fair, point-in-time S&P 500 (the index as it was each month since 2012, [RESEARCH_PIT.md](docs/RESEARCH_PIT.md)), momentum, residual momentum and the 52-week high all predict next month's returns no better than chance (rank IC $+0.003$, $0.000$, $-0.002$). Momentum's apparent skill on today's 30 mega caps (IC $+0.057$) was survivorship bias. The terminal's **Forecasts** panel (`FCST`) shows each stock's forecast with its range and this track record ([MATH.md §17.10](docs/MATH.md#1710-forecasts)).
+**Two pre-registered tests, no demonstrated edge.** On a fair, point-in-time S&P 500 (the index as it was each month since 2012, [RESEARCH_PIT.md](docs/RESEARCH_PIT.md)), momentum, residual momentum and the 52-week high all predict next month's returns no better than chance (rank IC $+0.003$, $0.000$, $-0.002$). Momentum's apparent skill on today's 30 mega caps (IC $+0.057$) was survivorship bias. A third test ([RESEARCH_3.md](docs/RESEARCH_3.md)) adopted **GARCH volatility forecasting**: better risk forecasts (QLIKE 0.47 → 0.37 out of sample) and a smaller worst drawdown in the backtest (−21.7% → −17.3%). It also showed that holding crypto through dips instead of selling makes things worse (Sharpe 0.92 → 0.69). The terminal's **Forecasts** panel (`FCST`) shows each stock's forecast with its range and this track record ([MATH.md §17.10](docs/MATH.md#1710-forecasts)).
 
 From [docs/RESEARCH.md](docs/RESEARCH.md) (2015 to 2026, net of costs, Sharpe excess of T-bills, ± one standard error):
 
