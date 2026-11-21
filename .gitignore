@@ -7,3 +7,4 @@ __pycache__/
 site/data.json
 site/crypto.json
 alerts.txt
+data/cache/

@@ -20,7 +20,7 @@ This document specifies every quantity the engine computes, in the order the cod
 14. [Statistical caveats](#14-statistical-caveats)
 15. [Parameter reference](#15-parameter-reference)
 16. [The crypto sleeve](#16-the-crypto-sleeve)
-17. [Desk analytics](#17-desk-analytics): factor risk model, attribution, stress, liquidity, limits, TCA, signal diagnostics, approval and audit, next-trade preview, data health, paper against backtest
+17. [Desk analytics](#17-desk-analytics): factor risk model, attribution, stress, liquidity, limits, TCA, signal diagnostics, approval and audit, next-trade preview, data health, paper against backtest, forecasts
 
 ---
 
@@ -479,7 +479,9 @@ Optionally, every rebalance and swap can wait for a person's approval, and every
 
 **Pre-registration.** Picking a configuration after seeing results is the most common way to fool yourself. Before momentum only replaced the blend, the rules for calling its edge "demonstrated" were committed to git ([PREREGISTRATION.md](PREREGISTRATION.md)): positive IC, information ratio against equal weight with $t \ge 2$, a deflated probability of at least 95% counting all 22 configurations tried, positive in 3 of 4 sub-periods, positive on the S&P 100, and confirmation on survivorship-free data. It failed four of the five rules that can be run (IR $-0.34$, $t = -1.2$; deflated probability 1%). On this evidence the strategy isn't suitable for outside money.
 
-**Upgrade path,** in order of value: a point-in-time universe with delisted stocks (the only way to test rule 6) → signals with independent evidence that this universe can't fake (fundamental value and quality, earnings revisions) → feeding the §17.1 factor model into the §9.5 optimizer in place of the sample covariance → square-root impact costs.
+**Test 2: a point-in-time universe** ([PREREGISTRATION_PIT.md](PREREGISTRATION_PIT.md), [RESEARCH_PIT.md](RESEARCH_PIT.md), `alphaforge/pit.py`). To remove the hindsight in "today's 30 winners", the second test uses the S&P 500 as it was at each month-end from 2012 (membership from the free `fja05680/sp500` list; 848 tickers, 645 priced by Yahoo, 84% of member-months covered). Three signals with outside evidence were registered in advance: 12-1 momentum, residual momentum (Blitz, Huij & Martens 2011) and the 52-week high (George & Hwang 2004). Each buys the top 20% each month against equal weight of all members. **None passed a single rule.** Momentum's monthly rank IC fell from $+0.057$ ($t = 2.2$) on the hindsight universe to $+0.003$ ($t = 0.2$) on the fair one: almost all of the earlier signal was survivorship bias. Residual momentum: IC $0.000$; 52-week high: $-0.002$. Information ratios against equal weight: $+0.05$, $+0.08$, $-0.26$, none with $|t| > 1$.
+
+**Upgrade path,** in order of value: complete prices for delisted stocks (Yahoo covers 84% of member-months; the rest needs a paid source such as Norgate, Sharadar or CRSP) → signals with independent evidence that this universe can't fake (fundamental value and quality, earnings revisions) → feeding the §17.1 factor model into the §9.5 optimizer in place of the sample covariance → square-root impact costs.
 
 ## 15. Parameter reference
 
@@ -670,6 +672,25 @@ with $A$ the account equity and $V^c$ the crypto sleeve's NAV (§13.0). Measurin
 
 Reported: the cumulative return of each, the gap, tracking error $\operatorname{sd}(r^{\text{paper}} - r^{\text{shadow}})\sqrt{A}$ (from 5 days) and correlation (from 20 days), next to the pass/fail rule in [LIVE_TRADING.md](LIVE_TRADING.md#before-real-money-a-passfail-rule): 126 trading days, correlation ≥ 0.9, average slippage within the assumed cost, and the edge test of §14. Until the next full rebalance the paper book still holds the old blend's stocks, so a gap is expected at first.
 
+### 17.10 Forecasts
+
+The Forecasts panel (`terminal.forecast_block`, command `FCST`) turns a signal into an expected return with an honest range, using Grinold's forecasting rule (Grinold & Kahn 2000):
+
+```math
+\mathbb E[r_i - \bar r \mid z_i] = \mathrm{IC}\cdot\sigma_i\cdot z_i,
+\qquad
+\text{68\% range} = \mathbb E[\cdot] \pm \sigma_i\sqrt{1-\mathrm{IC}^2},
+\qquad
+P(r_i > \bar r) = \Phi\!\left(\frac{\mathrm{IC}\, z_i}{\sqrt{1-\mathrm{IC}^2}}\right)
+```
+
+where $z_i$ is the name's standardized score, $\sigma_i$ its volatility over the horizon (daily standard deviation over the last 63 days for stocks or 60 for crypto, times $\sqrt{h}$), and IC the signal's measured information coefficient at that horizon. The rule follows from a regression of the next-period return on the score when both are roughly normal: the slope is $\mathrm{IC}\cdot\sigma_i$ per unit of $z$. The forecast is therefore only as good as the IC. With an IC near zero, every forecast is near zero and the range is the stock's normal move. That is the panel's point: it makes visible how little a signal knows.
+
+- **Stocks:** 12-1 momentum z-scored across the 100 or so names on the terminal, one-month horizon ($h = 21$), IC from the point-in-time test (`alphaforge/calibration.json`, written by `python -m alphaforge.pit`): $+0.003$, $t = 0.2$. The track-record row shows the average next-month return against the average stock for each fifth of the forecasts since 2012. A working forecast would climb from the lowest to the highest fifth; this one is flat.
+- **Crypto:** the trend score standardized against its own history across all coins (a time-series signal), one-week horizon, IC pooled over coins and month-ends (§17.5). It measures about $+0.11$ ($t \approx 2.9$), but on today's 8 surviving coins with no pre-registered test, so the panel marks it unproven.
+
+The forecasts are not used to trade. They describe what the signal implies, with its track record next to it.
+
 ## References
 
 - Ang, A., Hodrick, R., Xing, Y. & Zhang, X. (2006). The cross-section of volatility and expected returns. *Journal of Finance* 61(1).
@@ -683,6 +704,8 @@ Reported: the cumulative return of each, the gap, tracking error $\operatorname{
 - Jegadeesh, N. & Titman, S. (1993). Returns to buying winners and selling losers. *Journal of Finance* 48(1).
 - Ledoit, O. & Wolf, M. (2004). Honey, I shrunk the sample covariance matrix. *Journal of Portfolio Management* 30(4).
 - Lehmann, B. (1990). Fads, martingales, and market efficiency. *Quarterly Journal of Economics* 105(1).
+- Blitz, D., Huij, J. & Martens, M. (2011). Residual momentum. *Journal of Empirical Finance* 18(3).
+- George, T. & Hwang, C.-Y. (2004). The 52-week high and momentum investing. *Journal of Finance* 59(5).
 - Grinold, R. & Kahn, R. (2000). *Active Portfolio Management*, 2nd ed. McGraw-Hill.
 - Lo, A. (2002). The statistics of Sharpe ratios. *Financial Analysts Journal* 58(4).
 - Lou, D. & Polk, C. (2022). Comomentum: inferring arbitrage activity from return correlations. *Review of Financial Studies* 35(7).

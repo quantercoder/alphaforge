@@ -41,6 +41,7 @@ const FUNCS = {
   TCA: ["bltr", "Transaction cost analysis: decision vs fill, participation", () => { otab = "tca"; renderBltr(); }],
   IC: ["sig", "Signal diagnostics: IC and decay", () => { stab = "ic"; renderSig(); }],
   PREV: ["pre", "Next-trade preview and approval"], DATA: ["dh", "Data health checks"],
+  FCST: ["fc", "Forecasts: expected return, range and the signal's track record"],
   AUD: ["aud", "Alerts, audit trail, controls and permissions"],
 };
 const EXTRA = {
@@ -141,7 +142,8 @@ function renderGP() {
     <b class="px lv" id="gpx">${price(q.last)}</b><b class="${cls(q.pct)}" id="gchg">${price(q.chg, q.last)} ${pct(q.pct)}</b>
     ${LIVE.subs.includes(sym) ? `<span class="trk">● live tracked</span>` : ""}
     <span>52w <b>${price(q.lo52)} – ${price(q.hi52)}</b></span><span>Avg vol <b>${big(q.vol20)}</b></span>
-    ${s ? `<span>${CRYPTO ? "Trend" : "Alpha"} <b class="${cls(s.alpha)}">${fmt(s.alpha)}</b></span><span>Target <b>${pct(s.target, 1, false)}</b></span>` : ""}`;
+    ${s ? `<span>${CRYPTO ? "Trend" : "Alpha"} <b class="${cls(s.alpha)}">${fmt(s.alpha)}</b></span><span>Target <b>${pct(s.target, 1, false)}</b></span>` : ""}
+    ${fcOf(sym) ? `<span title="Forecast vs ${CRYPTO ? "an average week" : "the average stock"}, with a 68% range (FCST)">${fcLabel()} forecast <b class="${cls(fcOf(sym).fc)}">${pct(fcOf(sym).fc, 2)}</b> <small class="mut">${pct(fcOf(sym).lo, 1)} … ${pct(fcOf(sym).hi, 1)}</small></span>` : ""}`;
   $("range").innerHTML = [[22, "1M"], [65, "3M"], [130, "6M"], [CRYPTO ? 365 : 260, "1Y"]].map(([n, l]) =>
     `<button aria-pressed="${n === range}" data-n="${n}">${l}</button>`).join("");
   $("range").querySelectorAll("button").forEach((b) => b.onclick = () => { range = +b.dataset.n; renderGP(); });
@@ -608,6 +610,35 @@ function renderAud() {
   }
 }
 
+const fcOf = (s) => D.forecast && D.forecast.rows.find((r) => r.sym === s);
+const fcLabel = () => D.forecast.horizon === 21 ? "1-month" : `${D.forecast.horizon}-day`;
+
+function renderFc() {
+  const F = D.forecast;
+  if (!F || !F.rows.length) { $("fcb").innerHTML = later; $("fclabel").textContent = ""; return; }
+  $("fclabel").textContent = `${F.signal} · ${fcLabel()} · IC ${fmt(F.ic, 3)}`;
+  const n = Math.min(10, Math.floor(F.rows.length / 2));
+  const tbl = (rows) => table([CRYPTO ? "Coin" : "Ticker", "Forecast", "68% range", "P(beat avg)"], rows.map((r) =>
+    `<tr class="click" data-s="${esc(r.sym)}" title="${esc(nm(r.sym))}"><td class="s">${esc(r.sym)}</td><td class="${cls(r.fc)}">${pct(r.fc, 2)}</td>
+     <td class="mut">${pct(r.lo, 1)} … ${pct(r.hi, 1)}</td><td>${r.p == null ? "–" : pct(r.p, 0, false)}</td></tr>`));
+  const spread = F.rows[0].fc - F.rows[F.rows.length - 1].fc;
+  const width = F.rows.reduce((a, r) => a + (r.hi - r.lo), 0) / F.rows.length;
+  const q = F.quintiles;
+  $("fcb").innerHTML = `<div class="rgrid">
+      <div><span>Skill (rank IC)</span>${fmt(F.ic, 3)}${F.ic_t != null ? ` <small class="mut">t ${fmt(F.ic_t, 1)}</small>` : ""}</div>
+      <div><span>Track record</span>${F.hit_rate != null ? `${pct(F.hit_rate, 0, false)} of ${F.months} months right` : `${F.months ?? "–"} observations`}</div>
+      <div><span>Best vs worst forecast</span>${pct(spread, 2, false)}</div><div><span>Typical 68% range</span>±${pct(width / 2, 1, false)}</div></div>
+    <p class="note"><b class="${F.verdict.startsWith("no") || F.verdict.startsWith("unproven") ? "dn" : "up"}">${esc(F.verdict)}.</b> ${esc(F.unit)}; calibrated on ${esc(F.source)}.
+      The gap between the best and worst forecast is ${pct(spread, 2, false)}, while each stock's own range is about ±${pct(width / 2, 1, false)}: the signal moves the forecast far less than normal noise moves the price.</p>
+    <div class="fcgrid"><div><div class="sub">Highest forecasts</div>${tbl(F.rows.slice(0, n))}</div>
+      <div><div class="sub">Lowest forecasts</div>${tbl(F.rows.slice(-n).reverse())}</div></div>
+    ${q ? `<div class="sub">Track record: average next-month return vs the average stock, by forecast group (2012 on)</div>
+      ${table(["Lowest 20%", "2", "3", "4", "Highest 20%"], [`<tr>${q.map((v) => `<td class="${cls(v)}">${pct(v, 2)}</td>`).join("")}</tr>`])}
+      <p class="note">If the forecasts worked, this row would climb from left to right. Flat means the ranking predicts nothing.</p>` : ""}
+    <p class="note">Forecast = IC × the ${CRYPTO ? "coin" : "stock"}'s volatility over the period × its standardized score (Grinold's rule). The range is that volatility, barely narrowed by the signal. Click a name to chart it. Not investment advice.</p>`;
+  bindRows($("fcb"));
+}
+
 function renderStatus() {
   const st = D.status;
   $("asof").textContent = D.as_of;
@@ -1002,7 +1033,7 @@ async function load() {
   if (!sym || !D.ohlc[sym]) sym = D.ohlc[h] ? h : CRYPTO ? D.universe[0] : "SPY";
   if (!LIVE.subs.length) initTracked();
   renderStatus(); renderStrip(); renderMon(); renderGP(); renderPerf(); renderBook(); renderBltr(); renderSig(); renderRisk(); renderMth();
-  renderPre(); renderDH(); renderAud();
+  renderPre(); renderDH(); renderAud(); renderFc();
   for (const k of Object.keys(LIVE.last)) applyLive(k, false);
   if (Object.keys(LIVE.last).length) renderBook();
   if (!LIVE.started) {

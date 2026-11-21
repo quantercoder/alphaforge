@@ -127,3 +127,15 @@ def test_paper_returns_ignore_the_crypto_carve_out(tmp_path):
     nav, r = _paper_navs(str(tmp_path), "equity")
     assert r.round(6).tolist() == [round(1000 / 90000, 6), 0.0, round((1010 - 100) / 91000, 6)]
     assert nav.iloc[-1] == 91910
+
+
+def test_forecast_follows_grinolds_rule():
+    from alphaforge.terminal import forecast_block
+    z, sigma = pd.Series({"A": 2.0, "B": -1.0, "C": float("nan")}), {"A": 0.10, "B": 0.20, "C": 0.1}
+    f = forecast_block(z, sigma, 0.05, 21, {})
+    a = next(r for r in f["rows"] if r["sym"] == "A")
+    assert [r["sym"] for r in f["rows"]] == ["A", "B"]                      # sorted, NaN score dropped
+    assert a["fc"] == pytest.approx(0.05 * 0.10 * 2.0) and a["p"] > 0.5
+    assert a["hi"] - a["lo"] == pytest.approx(2 * 0.10 * (1 - 0.05 ** 2) ** 0.5)
+    zero = forecast_block(z, sigma, 0.0, 21, {})                             # no skill: every forecast is 0, 50/50
+    assert all(r["fc"] == 0 and r["p"] == 0.5 for r in zero["rows"])

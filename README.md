@@ -70,6 +70,8 @@ Every parameter (universe, mode, rebalance frequency, vol target, caps, costs, f
 
 ## Honest results
 
+**Two pre-registered tests, no demonstrated edge.** On a fair, point-in-time S&P 500 (the index as it was each month since 2012, [RESEARCH_PIT.md](docs/RESEARCH_PIT.md)), momentum, residual momentum and the 52-week high all predict next month's returns no better than chance (rank IC $+0.003$, $0.000$, $-0.002$). Momentum's apparent skill on today's 30 mega caps (IC $+0.057$) was survivorship bias. The terminal's **Forecasts** panel (`FCST`) shows each stock's forecast with its range and this track record ([MATH.md §17.10](docs/MATH.md#1710-forecasts)).
+
 From [docs/RESEARCH.md](docs/RESEARCH.md) (2015 to 2026, net of costs, Sharpe excess of T-bills, ± one standard error):
 
 | Series | CAGR | Sharpe | Max DD |
@@ -114,6 +116,10 @@ These limits are deliberate. The engine is built so each one can be swapped in:
 - Metric functions match hand-computed values.
 
 `tests/test_desk.py` checks the desk analytics and construction: the QP solver against a known answer, the optimizer's sector, beta and position limits and turnover penalty, that the optimized backtest has no look-ahead, the shadow backtest's start date, and that the crypto carve-out isn't counted as a loss. It also checks the desk analytics: risk shares (by factor group and by name) add up to 100% and total variance = factor + specific; attribution adds up exactly to the strategy's return; TCA splits slippage into delay and impact; traffic-light thresholds; and that the approval gate holds a rebalance across runs and releases it on approval.
+
+`tests/test_pit.py` checks the point-in-time test's machinery: membership spells and ticker formats, that no signal uses a later price, and that a cheating signal is caught while noise is not. `tests/test_desk.py` also checks the forecast rule.
+
+`scripts/smoke.py` runs two simulated trading days on today's real data and builds the terminal; `node scripts/fe_check.js` then renders every tab and command and fails on any error, `undefined` or `NaN`.
 
 `tests/test_live.py` checks the trading job, including the freshness check (exchange-calendar logic, filling a missing close from Alpaca with the IEX fallback, and the stale alert): the crypto sleeve's NAV ledger, that the stock strategy never sizes from or sells coins, that a crypto halt leaves stocks untouched, fractional crypto orders, idempotent retries, that stale-order cleanup never touches hand-placed orders, migration of old state, and the swap overlay end to end.
 

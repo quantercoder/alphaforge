@@ -3,6 +3,7 @@ import json
 import math
 import os
 from datetime import datetime, timezone
+from statistics import NormalDist
 
 import numpy as np
 import pandas as pd
@@ -452,6 +453,30 @@ def desk_block(kind, *, lc, sc, strat, m, raw, prices, bench, bench_label, unive
             "tca": tca["summary"], "tca_rows": tca["rows"], "health": health, "controls": ctl, "alerts_now": live_alerts}
 
 
+# ---------------------------------------------------------------- forecasts
+
+CALIBRATION = os.path.join(os.path.dirname(os.path.abspath(__file__)), "calibration.json")
+N01 = NormalDist()
+
+
+def forecast_block(z, sigma, ic, horizon, meta):
+    """Grinold's forecasting rule: expected return relative to the universe = IC x volatility x score.
+
+    z: standardized score per name; sigma: each name's volatility over the horizon; ic: the signal's
+    measured information coefficient at that horizon. With an IC near zero every forecast is near zero
+    and the 68% range is about +/- sigma: the screen shows how little the signal knows."""
+    rows = []
+    shrink = math.sqrt(max(1 - ic * ic, 0))
+    for s in z.index:
+        if not (np.isfinite(z[s]) and np.isfinite(sigma.get(s, np.nan))):
+            continue
+        fc = ic * sigma[s] * z[s]
+        rows.append({"sym": s, "z": float(z[s]), "fc": fc, "lo": fc - sigma[s] * shrink, "hi": fc + sigma[s] * shrink,
+                     "p": N01.cdf(ic * z[s] / shrink) if shrink else None})
+    rows.sort(key=lambda r: -r["fc"])
+    return {**meta, "ic": ic, "horizon": horizon, "rows": rows}
+
+
 # ---------------------------------------------------------------- pages
 
 def build(raw, prices, bench, lc, broker, state_dir, site_dir, craw=None, cprices=None):
@@ -472,6 +497,21 @@ def build(raw, prices, bench, lc, broker, state_dir, site_dir, craw=None, cprice
     _write(f"{site_dir}/data.json", equity_page(raw, prices, bench, lc, broker, state_dir, meta, nv, account, now))
     if cprices is not None:
         _write(f"{site_dir}/crypto.json", crypto_page(craw, cprices, lc, broker, state_dir, meta, nv, account, now))
+
+
+def equity_forecast(mp, horizon=21):
+    """One-month forecasts for every name with a year of history, calibrated on the point-in-time
+    S&P 500 test (alphaforge/calibration.json, written by `python -m alphaforge.pit`)."""
+    if not os.path.exists(CALIBRATION):
+        return None
+    with open(CALIBRATION) as f:
+        cal = json.load(f)
+    z = signals.cs_zscore(signals.momentum(mp)).iloc[-1]
+    sigma = mp.pct_change().iloc[-63:].std() * math.sqrt(horizon)
+    return forecast_block(z, sigma, cal["ic_mean"], horizon, {
+        "signal": cal["signal"], "ic_t": cal["ic_t"], "hit_rate": cal["hit_rate"], "months": cal["months"],
+        "quintiles": cal["quintile_excess"], "verdict": cal["verdict"], "source": "point-in-time S&P 500, 2012 on",
+        "unit": "next month vs the average stock"})
 
 
 def equity_page(raw, prices, bench, lc, broker, state_dir, meta, nv, account, now):
@@ -553,7 +593,23 @@ def equity_page(raw, prices, bench, lc, broker, state_dir, meta, nv, account, no
         "book": book, "totals": totals, "blotter": blotter, "slippage": {"avg_bps": slip[0], "n": slip[1]},
         "risk": risk, "desk": desk,
         "tracking": tracking_block(state_dir, "equity", prices, strat, bench, rf, 252),
+        "forecast": equity_forecast(mp),
     }
+
+
+def crypto_forecast(trend, rets, ic_table, horizon=7):
+    """One-week forecasts from the trend score. It is a time-series signal, so the score is standardized
+    against its own history across all coins, and the IC is pooled across coins and month-ends."""
+    c = ic_table.get(str(horizon)) or {}
+    if c.get("ic") is None or not np.isfinite(c["ic"]):
+        return None
+    hist = trend.stack()
+    z = (trend.iloc[-1] - hist.mean()) / hist.std()
+    sigma = rets.iloc[-60:].std() * math.sqrt(horizon)
+    return forecast_block(z, sigma, float(c["ic"]), horizon, {
+        "signal": "trend (20/60/120-day)", "ic_t": c.get("t"), "hit_rate": None, "months": c.get("n"), "quintiles": None,
+        "verdict": "unproven: 8 surviving coins, no pre-registered test", "source": "pooled over today's 8 coins since 2019",
+        "unit": "next week vs the coins' average week"})
 
 
 def crypto_page(craw, cprices, lc, broker, state_dir, meta, nv, account, now):
@@ -622,5 +678,6 @@ def crypto_page(craw, cprices, lc, broker, state_dir, meta, nv, account, now):
         "sleeve_curve": {"dates": list(_curve(state_dir, "crypto").index), "curve": _curve(state_dir, "crypto").tolist()},
         "book": book, "totals": totals, "blotter": blotter, "slippage": {"avg_bps": slip[0], "n": slip[1]},
         "risk": risk, "desk": desk,
+        "forecast": crypto_forecast(trend, rets, desk["signals"]["ic"]["trend"]),
         "tracking": tracking_block(state_dir, "crypto", cprices, strat, btc, None, 365, m.get("start")) if m.get("start") else None,
     }

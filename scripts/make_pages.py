@@ -73,6 +73,7 @@ TEMPLATE = '''<!doctype html>
   <section class="p" id="pre"><h2><span>Next trade <small class="k">PREV</small></span><small id="prelabel"></small></h2><div class="body" id="preb"></div></section>
   <section class="p" id="aud"><h2><span>Alerts &amp; audit <small class="k">AUD</small></span><span class="tabs" id="atabs"></span></h2><div class="body" id="audb"></div></section>
   <section class="p" id="dh"><h2><span>Data health <small class="k">DATA</small></span><small id="dhlabel"></small></h2><div class="body" id="dhb"></div></section>
+  <section class="p" id="fc"><h2><span>Forecasts <small class="k">FCST</small></span><small id="fclabel"></small></h2><div class="body" id="fcb"></div></section>
 </main>
 
 <nav class="fkeys" id="fkeys" aria-label="Functions"></nav>
@@ -101,7 +102,7 @@ TEMPLATE = '''<!doctype html>
   <code>MON</code> monitor · <code>PORT</code> book · <code>BLTR</code> orders · <code>SIG</code> signals<br>
   <code>RISK</code> risk · <code>BT</code> backtest · <code>MTH</code> monthly · <code>HELP</code> this panel<br>
   <code>ATTR</code> P&amp;L attribution · <code>FACT</code> factor risk · <code>STRESS</code> stress tests · <code>LIQ</code> liquidity · <code>LIM</code> limits<br>
-  <code>EXP</code> active weights · <code>TCA</code> trading costs · <code>IC</code> signal decay · <code>PREV</code> next trade · <code>DATA</code> data health · <code>AUD</code> alerts &amp; audit<br>
+  <code>EXP</code> active weights · <code>TCA</code> trading costs · <code>IC</code> signal decay · <code>PREV</code> next trade · <code>DATA</code> data health · <code>AUD</code> alerts &amp; audit · <code>FCST</code> forecasts<br>
   <code>EQUITY</code> / <code>CRYPTO</code> switch page · <code>LIVE</code> real-time prices · <code>LIVE OFF</code> disconnect{live_list}</p>
   <p>F1 to F9 map to the function bar. Data refreshes every five minutes; with LIVE on, prices and P&amp;L update tick by tick.</p>
   <form method="dialog"><button class="go">Close</button></form>
