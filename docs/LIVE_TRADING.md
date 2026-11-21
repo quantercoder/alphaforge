@@ -57,6 +57,7 @@ Run it once per weekday after 16:00 New York time. Running twice on the same day
 | 21:15 | Trading run: `python -m alphaforge.live`, then commits `state/` (account, equity curve, orders) to `main` |
 | every 30 min, 13:00–20:30 | Quote refresh: `--quotes-only`, no trading |
 | on push to `site/`, `alphaforge/` or `live.json` | Quote refresh and redeploy |
+| 12:30 (workflow `lab`) | Rebuilds the Lab page's data (`site/lab.json`) and `docs/RESEARCH_4.md`, then commits them; the 13:00 refresh deploys them. No broker keys. |
 | Run workflow (manual) | *trade*: run the trading step now. *approve*: `equity`, `crypto` or `all` releases a rebalance or swap waiting for approval and trades it |
 
 Every run redeploys the terminal to GitHub Pages. `state/` in git is the audit trail: each commit is one trading day. To pause automation, disable the workflow under **Actions → terminal → ⋯ → Disable workflow**. To stop trading but keep quotes, set the repository variable `ALPHAFORGE_KILL` to `1` (Settings → Secrets and variables → Actions → Variables).

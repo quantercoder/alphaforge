@@ -1,0 +1,40 @@
+name: lab
+# Rebuilds the Lab page's data (site/lab.json) and the test-4 report every weekday before the market opens.
+# It needs no broker keys: the paper book comes from state/positions.csv. The 13:00 UTC quote refresh
+# of the terminal workflow then deploys it with the rest of the site.
+on:
+  schedule:
+    - cron: "30 12 * * 1,2,3,4,5"   # 12:30 UTC, before the 13:00 refresh that redeploys the site
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lab
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - name: Build the Lab
+        run: python -m alphaforge.lab
+
+      - name: Commit the Lab data
+        run: |
+          git config user.name "alphaforge-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add site/lab.json docs/RESEARCH_4.md
+          if ! git diff --cached --quiet; then
+            git commit -m "lab: $(date -u +%F)"
+            git pull --rebase -q && git push
+          fi
