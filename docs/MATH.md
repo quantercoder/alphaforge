@@ -498,6 +498,8 @@ With Alpaca as the broker, `live.fill_latest_closes` runs before any signal:
 
 Stale data is reported rather than refused, because refusing could skip a month-end signal (§13.1 catches up only after two months). The hard guard remains: no trading at all when the latest close is older than `max_data_age_days`. The simulator has no market data source, so it skips the check.
 
+**Index mode** (`index` in `live.json`, live on paper since November 2026): the equity sleeve holds the index at $w_t = \min(L_{\max}, \sigma^\star/\sigma^{	ext{GARCH}}_t)$, halved (capped at 1) below the 200-day average, re-targeted only when $|w^{	ext{new}} - w^{	ext{set}}| > 0.10$ (`live.index_step`; test 8, §19's simulator for the leverage trade-off). Orders use the same sizing and filters as §13.2.
+
 Optionally, every rebalance and swap can wait for a person's approval, and every trading run is written to an audit log ([§17.6](#176-approval-audit-permissions)).
 
 ## 14. Statistical caveats

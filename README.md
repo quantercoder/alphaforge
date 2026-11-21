@@ -69,6 +69,10 @@ prices ─▶ factors ─▶ z-score + winsorize ─▶ blended alpha ─▶ wei
 
 Every parameter (universe, mode, rebalance frequency, vol target, caps, costs, factor weights) is a sidebar control. If Yahoo is unreachable, the **Synthetic** source runs fully offline.
 
+## Live strategy (paper)
+
+Since November 2026 the equity sleeve runs **option A**, the only strategy that passed a test aimed at the S&P 500 (test 8, [RESEARCH_8.md](docs/RESEARCH_8.md)). It holds SPY sized to 20% volatility with GARCH, up to 1.5× with margin, halved while SPY is below its 200-day average, and is checked daily. From 1998 it matched SPY's return (8.9% a year) with a worst drawdown of −37% instead of −55%. After realistic margin costs it does not beat SPY's return; its advantage is smaller crashes. The crypto sleeve is unchanged. Momentum and every other strategy stay on the pages as research.
+
 ## Multi-Asset
 
 `multiasset.html`, the fourth page: 16 ETFs across US and international stocks, government bonds, credit, real assets and currencies; seven professional strategies (trend following, risk parity, dual momentum, 60/40, the permanent portfolio, equal weight, the S&P 500) with their returns in five stock-market crises; and a **return-target simulator**: pick a target return a year and see, for each portfolio, the leverage it took historically, the worst drawdown and worst year that came with it, and the odds of being down after 1, 3 and 5 years ([MATH.md §19](docs/MATH.md#19-multi-asset-strategies-and-return-targets)). Test 9 ([RESEARCH_9.md](docs/RESEARCH_9.md)): trend following diversifies (correlation 0.38 with the S&P) and halved the worst drawdown in a 50/50 mix, but failed its risk-adjusted and crisis rules, so it doesn't trade. No stock, bond or diversified mix reached 20% a year at any leverage up to 3×.

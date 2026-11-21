@@ -378,3 +378,44 @@ def test_still_stale_is_reported(monkeypatch):
     monkeypatch.setattr(b, "last_close_date", lambda now=None: "2026-10-08")
     _, note = fill_latest_closes(_raw(), ["AAPL"], b)
     assert note.startswith("prices stale: latest close 2026-10-07")
+
+
+# ---------------------------------------------------------------- option A: risk-targeted index sleeve
+
+def _index_lc(lc):
+    return {**lc, "max_order_notional": 1e9, "max_drawdown_halt": 0.45,
+            "index": {"enabled": True, "symbol": "SPY", "target_vol": 0.20, "max_leverage": 1.5, "trend_filter": True,
+                      "band": 0.10, "repair": 0.25}}
+
+
+def test_index_target_and_trend_filter():
+    from alphaforge.live import index_target
+    ix = {"target_vol": 0.20, "max_leverage": 1.5, "trend_filter": True}
+    rng = np.random.default_rng(0)
+    idx = pd.bdate_range("2012-01-02", periods=1500)
+    up = pd.Series(100 * np.exp(np.cumsum(rng.normal(0.0006, 0.01, 1500))), index=idx)
+    w_up, vol = index_target(up, ix)
+    assert w_up == pytest.approx(min(1.5, 0.20 / vol))
+    down = up.copy()
+    down.iloc[-60:] = down.iloc[-61] * np.linspace(1, 0.8, 60)          # a fall below the 200-day average
+    w_down, vol_d = index_target(down, ix)
+    assert w_down == pytest.approx(min(min(1.5, 0.20 / vol_d) / 2, 1.0))
+
+
+def test_index_sleeve_buys_target_sells_the_rest_and_respects_the_band(tmp_path, lc):
+    from alphaforge.broker import SimBroker
+    prices, spy = synthetic_prices(n_assets=12, n_days=1500, seed=3)
+    spy = spy.rename("SPY")
+    state = str(tmp_path)
+    cfg = _index_lc(lc)
+    run(lc, prices.iloc[:-2], state)                                     # first: the old momentum book
+    run(lc, prices.iloc[:-1], state)
+    assert len(SimBroker(os.path.join(state, "account.json")).positions()) > 1
+    r = run(cfg, prices.iloc[:-1], state, index_prices=spy)
+    pos = SimBroker(os.path.join(state, "account.json")).positions()
+    assert set(pos) == {"SPY"} and any("rebalanced to" in e for e in r["events"])
+    meta = json.load(open(os.path.join(state, "meta.json")))["equity"]
+    w = pos["SPY"]["qty"] * spy.iloc[-2] / r["navs"]["equity"]
+    assert w == pytest.approx(meta["index_w"], abs=0.02)
+    r2 = run(cfg, prices, state, index_prices=spy)                        # next day: target barely moves
+    assert not r2["fills"] and not any("rebalanced" in e for e in r2["events"])

@@ -6,7 +6,9 @@
                "factor_weights": {"momentum": 1.0, "reversal": 0.0, "low_vol": 0.0, "quality_trend": 0.0},
                "max_sector": 0.4, "max_beta": 1.2, "turnover_penalty": 0.001, "vol_model": "garch"},
   "min_trade_notional": 200,
-  "max_order_notional": 25000,
-  "max_drawdown_halt": 0.2,
+  "max_order_notional": 150000,
+  "max_drawdown_halt": 0.45,
+  "index": {"enabled": true, "symbol": "SPY", "target_vol": 0.20, "max_leverage": 1.5, "trend_filter": true,
+            "band": 0.10, "repair": 0.25},
   "crypto": {"enabled": true, "budget": 10000}
 }

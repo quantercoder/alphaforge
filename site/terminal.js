@@ -564,6 +564,10 @@ function renderPre() {
   $("preb").innerHTML = `<div class="acct"><span>Next rebalance <b>${esc(n.rebalance || "–")}</b></span>${n.swap ? `<span>Next swap check <b>${esc(n.swap)}</b></span>` : ""}
       <span>Max order <b>${money(P.max_order)}</b></span><span>Min trade <b>${money(P.min_trade)}</b></span></div>
     ${appr}
+    ${P.index ? kpiRow([["Target today", `<b>${fmt(P.index.target, 2)}×</b> ${esc(P.index.symbol)}`], ["Last set", P.index.set == null ? "–" : fmt(P.index.set, 2) + "×"],
+        ["Holding now", fmt(P.index.held, 2) + "×"], ["GARCH volatility", pct(P.index.vol, 1, false)],
+        ["Trend", P.index.trend_up ? '<span class="up">above 200-day</span>' : '<span class="dn">below 200-day: half size</span>'],
+        ["Rule", `${pct(P.index.target_vol, 0, false)} vol, ≤${fmt(P.index.max_leverage, 1)}×`], ["Band", `±${fmt(P.index.band, 2)}×`], ["Tested", "test 8 (R2)"]]) : ""}
     <div class="sub">Rebalance, if it ran on today's prices</div>${sum(R)}${orders(R.orders)}
     ${S ? `<div class="sub">Swap check: ${S.drop.length ? `drop ${S.drop.map((s) => `${esc(s)} <span class="dn">${pct(S.pnl[s], 1)}</span>`).join(", ")} → add ${S.add.map(esc).join(", ")}`
       : "nothing would be swapped"}</div>${S.drop.length ? orders(S.orders) : ""}` : ""}

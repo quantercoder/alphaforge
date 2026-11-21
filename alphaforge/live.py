@@ -226,6 +226,40 @@ def navs(broker, lc, meta, px_all, start=False):
 
 # ---------------------------------------------------------------- one sleeve, one day
 
+def index_target(spy, ix):
+    """Option A / R2 of test 8: weight in the index = min(max_leverage, target_vol / GARCH vol); with the trend
+    filter, half of that (at most 1.0) while the index is below its 200-day average."""
+    from .models import garch_filtered_vol
+    vol = garch_filtered_vol(np.log(spy).diff()).dropna()
+    w = min(ix["max_leverage"], ix["target_vol"] / float(vol.iloc[-1]))
+    if ix.get("trend_filter", True) and spy.iloc[-1] < spy.rolling(200).mean().iloc[-1]:
+        w = min(w / 2, 1.0)
+    return w, float(vol.iloc[-1])
+
+
+def index_step(sc, prices, broker, m, nav, positions, px, prefix):
+    """Risk-targeted index sleeve, checked every day. The target only moves when it changes by more than `band`
+    (as tested); the book is also brought back to target when it sits more than `repair` away, e.g. after a
+    rejected order, or when it still holds anything other than the index."""
+    ix = sc["index"]
+    sym = ix["symbol"]
+    target, vol = index_target(prices[sym].dropna(), ix)
+    last = m.get("index_w")
+    held = positions.get(sym, {}).get("qty", 0.0) * float(px[sym]) / nav if nav else 0.0
+    others = [s for s in positions if s != sym]
+    events = [f"index target {target:.2f}x (GARCH vol {vol:.1%}), holding {held:.2f}x"]
+    retarget = last is None or abs(target - last) > ix["band"]
+    new = target if retarget else last
+    if retarget or others or abs(held - new) > ix["repair"]:
+        if hasattr(broker, "cancel_stale"):
+            broker.cancel_stale(sc["cls"], prefix)
+        fills = submit_all(broker, plan_orders({sym: new}, positions, nav, px, sc), px, f"{prefix}-ix")
+        m["index_w"] = new
+        events.append(f"rebalanced to {new:.2f}x {sym}" + (f", sold {', '.join(others)}" if others else ""))
+        return fills, events
+    return [], events
+
+
 def step_sleeve(name, sc, prices, broker, m, nav, positions, d, state_dir):
     """Run one sleeve for the day. Returns (fills, events, alerts)."""
     strat = Config(**sc["strategy"])
@@ -252,6 +286,11 @@ def step_sleeve(name, sc, prices, broker, m, nav, positions, d, state_dir):
             fills += submit_all(broker, orders, px, f"{prefix}-kl")
             events.append("flattened book")
         m["pending"] = None
+    elif name == "equity" and (sc.get("index") or {}).get("enabled"):
+        m.setdefault("index_start", d)  # the day the sleeve switched to the index (paper tracking starts here)
+        f, e = index_step(sc, prices, broker, m, nav, positions, px, prefix)
+        fills += f
+        events += e
     else:
         p = m.get("pending")
         if p and not broker.queues_orders and d > p["signal_date"]:
@@ -362,9 +401,15 @@ def _load_meta(path):
     return meta
 
 
-def run(lc, prices, state_dir="state", broker=None, today=None, crypto_prices=None):
-    """One trading day for every enabled sleeve. Persists account, equity curve, orders and meta."""
+def run(lc, prices, state_dir="state", broker=None, today=None, crypto_prices=None, index_prices=None):
+    """One trading day for every enabled sleeve. Persists account, equity curve, orders and meta.
+    index_prices: the index's closes (e.g. SPY), needed when the equity sleeve runs in index mode."""
     os.makedirs(state_dir, exist_ok=True)
+    ix = lc.get("index") or {}
+    if ix.get("enabled") and ix["symbol"] not in prices:
+        if index_prices is None:
+            raise RuntimeError("index mode needs index_prices")
+        prices = prices.join(index_prices.rename(ix["symbol"]), how="left")
     broker = broker or make_broker(lc, state_dir)
     meta_path = f"{state_dir}/meta.json"
     meta = _load_meta(meta_path)
@@ -496,7 +541,7 @@ def main():
 
     alerts = []
     if not a.quotes_only:
-        report = run(lc, prices, a.state, broker, crypto_prices=cprices)
+        report = run(lc, prices, a.state, broker, crypto_prices=cprices, index_prices=bench)
         print(json.dumps({k: v for k, v in report.items() if k != "fills"}, default=str))
         for fl in report["fills"]:
             print("  ", fl)

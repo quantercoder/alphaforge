@@ -502,6 +502,8 @@ def build(raw, prices, bench, lc, broker, state_dir, site_dir, craw=None, cprice
 
     meta = _load_meta(f"{state_dir}/meta.json")
     px_all = prices.iloc[-1].dropna()
+    if bench.name not in px_all and len(bench.dropna()):  # the index can be held (index mode): price it too
+        px_all[bench.name or "SPY"] = float(bench.dropna().iloc[-1])
     if cprices is not None:
         px_all = pd.concat([px_all.rename(None), cprices.iloc[-1].dropna().rename(None)])  # different dates, see live.run
     nv = navs(broker, lc, meta, px_all)
@@ -542,6 +544,69 @@ def equity_forecast(mp, horizon=21):
         "unit": "next month vs the average stock"})
 
 
+def index_desk(ix, sc, m, spy, bookp, pos, nav, risk, desk, strat):
+    """Option A's next trade, limits and alerts (replacing the momentum strategy's)."""
+    from .live import index_target, plan_orders
+    sym = ix["symbol"]
+    target, vol = index_target(spy.dropna(), ix)
+    last = m.get("index_w")
+    px = bookp.iloc[-1].dropna()
+    held = pos.get(sym, {}).get("qty", 0.0) * float(px[sym]) / nav if nav else 0.0
+    new = target if last is None or abs(target - last) > ix["band"] else last
+    others = [s for s in pos if s != sym]
+    trade = last is None or bool(others) or abs(target - last) > ix["band"] or abs(held - new) > ix["repair"]
+    orders = plan_orders({sym: new}, pos, nav, px, sc) if trade else []
+    cost = strat.cost_bps + strat.slippage_bps
+    trend_up = bool(spy.iloc[-1] >= spy.rolling(200).mean().iloc[-1])
+    preview = {"next": {"rebalance": f"every trading day; trades when the target moves more than {ix['band']:.2f}x", "swap": None},
+               "rebalance": analytics.preview_orders(orders, px, pos, nav, sc, cost, sector),
+               "require_approval": bool(sc.get("require_approval")), "awaiting": m.get("awaiting"),
+               "max_order": sc["max_order_notional"], "min_trade": sc["min_trade_notional"],
+               "approve_url": f"{REPO}/actions/workflows/terminal.yml",
+               "index": {"symbol": sym, "target": target, "set": last, "held": held, "vol": vol, "trend_up": trend_up,
+                         "band": ix["band"], "max_leverage": ix["max_leverage"], "target_vol": ix["target_vol"]}}
+    nxt = max([abs(o["notional"]) for o in preview["rebalance"]["orders"]] + [0])
+    dd = next((r for r in desk["limits"] if r["name"] == "Drawdown vs halt"), None)
+    days = next((r for r in desk["limits"] if r["name"].startswith("Days to exit")), None)
+    lim = analytics.limits([
+        ("Gross exposure", risk["gross"], ix["max_leverage"], "hard", "pct"),
+        ("Index weight", held, ix["max_leverage"], "hard", "pct"),
+        ("Drawdown vs halt", dd["value"] if dd else None, dd["limit"] if dd else None, "hard", "pct"),
+        ("Largest next order", nxt or None, sc["max_order_notional"], "hard", "usd"),
+        ("Forecast volatility", risk["ex_ante_vol"] if risk["gross"] else None, ix["target_vol"] * 1.5, "soft", "pct"),
+        ("1-day VaR 95% / NAV", risk["var95"] / nav if nav and risk["gross"] else None, 0.04, "soft", "pct"),
+        ("Days to exit at 10% ADV", days["value"] if days else None, days["limit"] if days else None, "soft", "num"),
+    ])
+    alerts = ([a for a in desk["alerts_now"] if not a.startswith("limit breach")]
+              + [f"limit breach: {r['name']}" for r in lim if r["light"] == "red"])
+    return {"preview": preview, "limits": lim, "alerts_now": alerts}
+
+
+def index_tracking(state_dir, ix, m, spy, rf):
+    """Paper sleeve against option A's own backtest (test 8, R2) from the day the sleeve switched to it."""
+    from . import models, test8
+    start = m.get("index_start")
+    nav, r = _paper_navs(state_dir, "equity")
+    if not start or not len(nav):
+        return None
+    start = pd.Timestamp(start)
+    nav = nav[nav.index >= start]
+    if len(nav) < 1:
+        return None
+    garch = models.garch_filtered_vol(np.log(spy).diff())
+    full = (ix["target_vol"] / garch).clip(upper=ix["max_leverage"])
+    target = full.where(spy >= spy.rolling(200).mean(), (full / 2).clip(upper=1.0)) if ix.get("trend_filter") else full
+    sr, _ = test8.simulate(test8.banded(target, ix["band"]), spy.pct_change().fillna(0), rf.reindex(spy.index).fillna(0))
+    s = (1 + sr.loc[start:]).cumprod().reindex(nav.index).ffill().fillna(1.0)
+    rp, rs = r.reindex(nav.index[1:]), s.pct_change().iloc[1:]
+    d = (rp - rs).dropna()
+    return {"start": str(start.date()), "dates": [str(i.date()) for i in nav.index],
+            "paper": (nav / nav.iloc[0]).tolist(), "shadow": (s / s.iloc[0]).tolist(), "n": len(d),
+            "paper_ret": float(nav.iloc[-1] / nav.iloc[0] - 1), "shadow_ret": float(s.iloc[-1] / s.iloc[0] - 1),
+            "te": float(d.std() * math.sqrt(252)) if len(d) >= 5 else None,
+            "corr": float(rp.corr(rs)) if len(d) >= 20 else None}
+
+
 def equity_page(raw, prices, bench, lc, broker, state_dir, meta, nv, account, now):
     strat = Config(**lc["strategy"])
     m = meta.get("equity", {})
@@ -569,14 +634,18 @@ def equity_page(raw, prices, bench, lc, broker, state_dir, meta, nv, account, no
     sig.sort(key=lambda x: -(x["alpha"] if x["alpha"] == x["alpha"] else -9))
 
     nav = nv["equity"]
+    ix = lc.get("index") if (lc.get("index") or {}).get("enabled") else None
+    # Index mode (option A): the book holds the index, so book and risk run on the strategy's names plus it.
+    bookp = prices.join(bench.rename(ix["symbol"])) if ix and ix["symbol"] not in prices else prices
+    ru = list(bookp.columns)
     pos = repair_costs({s: p for s, p in nv["positions"].items() if p["cls"] == "us_equity"}, broker)
-    book, totals = book_rows(pos, nav, prices.iloc[-1], prices.iloc[-2])
-    w = pd.Series({x["sym"]: x["weight"] for x in book if x["sym"] in universe}, dtype=float).reindex(universe).fillna(0)
-    risk = risk_block(w, rets, bench.pct_change(), nav, 252, strat.cov_lookback, -0.10, "S&P 500 -10%",
+    book, totals = book_rows(pos, nav, bookp.iloc[-1], bookp.iloc[-2])
+    w = pd.Series({x["sym"]: x["weight"] for x in book if x["sym"] in ru}, dtype=float).reindex(ru).fillna(0)
+    risk = risk_block(w, bookp.pct_change(), bench.pct_change(), nav, 252, strat.cov_lookback, -0.10, "S&P 500 -10%",
                       lambda s: (sector(s), s))
-    sectors = pd.Series({s: w[s] for s in universe}).groupby(sector).sum()
+    sectors = pd.Series({s: w[s] for s in ru}).groupby(sector).sum()
     risk["sectors"] = {k: float(v) for k, v in sectors[sectors.abs() > 1e-4].sort_values(ascending=False).items()}
-    risk["exposures"] = {f: float((w * sc.iloc[-1].fillna(0)).sum()) for f, sc in scores.items()}
+    risk["exposures"] = {f: float((w.reindex(universe).fillna(0) * sc.iloc[-1].fillna(0)).sum()) for f, sc in scores.items()}
     blotter, slip = blotter_rows(broker, "us_equity", "equity", state_dir)
 
     # Factor risk model on the S&P 100 (strategy names + watchlist) with a year of daily returns.
@@ -588,8 +657,8 @@ def equity_page(raw, prices, bench, lc, broker, state_dir, meta, nv, account, no
     bench_w = pd.Series(1 / len(universe), index=universe)
     target = _last_target(m, alpha, rets, prices, strat)
     sc_eq = sleeve_configs(lc)["equity"]
-    desk = desk_block("equity", lc=lc, sc=sc_eq, strat=strat, m=m, raw=raw, prices=prices, bench=bench, bench_label="S&P 500",
-                      universe=universe, ysym=lambda s: s, model=model, w=w, bench_w=bench_w, res=res, book=book, risk=risk,
+    desk = desk_block("equity", lc=lc, sc=sc_eq, strat=strat, m=m, raw=raw, prices=bookp, bench=bench, bench_label="S&P 500",
+                      universe=ru, ysym=lambda s: s, model=model, w=w, bench_w=bench_w.reindex(ru).fillna(0), res=res, book=book, risk=risk,
                       nav=nav, st=_status(lc, lc, m, nav, ""), tgt=tgt, alpha=alpha, rets=rets, pos=pos,
                       positions_all=nv["positions"], broker=broker, blotter=blotter, quotes={s: quote(raw, s) for s in shown},
                       px_all=prices.iloc[-1], scenarios=analytics.EQUITY_SCENARIOS, sector_fn=sector,
@@ -607,9 +676,16 @@ def equity_page(raw, prices, bench, lc, broker, state_dir, meta, nv, account, no
                                         "strategy": res.weights.loc[trade_days]}, adv)}
 
     rule = "month-end rebalance" + (f", swap worst {strat.swap_count} every {strat.swap_every}d" if strat.swap_every else "")
+    tracking = tracking_block(state_dir, "equity", prices, strat, bench, rf, 252)
+    if ix:
+        rule = (f"{ix['symbol']} risk-targeted: {ix['target_vol']:.0%} volatility, up to {ix['max_leverage']:g}x"
+                + (", halved below its 200-day average" if ix.get("trend_filter") else "") + ", checked daily")
+        desk.update(index_desk(ix, sc_eq, m, bench, bookp, pos, nav, risk, desk, strat))
+        tracking = index_tracking(state_dir, ix, m, bench, rf)
     return {
         "page": "equity", "generated_at": now, "as_of": str(prices.index[-1].date()),
-        "status": {**_status(lc, lc, m, nav, rule), "mode": strat.mode, "target_vol": strat.target_vol,
+        "status": {**_status(lc, lc, m, nav, rule), "mode": "index" if ix else strat.mode,
+                   "target_vol": ix["target_vol"] if ix else strat.target_vol,
                    "cost_bps": strat.cost_bps + strat.slippage_bps},
         "strip": {k: quote(raw, v) for k, v in MARKET_STRIP.items() if v in raw["Close"]},
         "universe": universe,
@@ -620,7 +696,7 @@ def equity_page(raw, prices, bench, lc, broker, state_dir, meta, nv, account, no
         "sleeve_curve": {"dates": list(_curve(state_dir, "equity").index), "curve": _curve(state_dir, "equity").tolist()},
         "book": book, "totals": totals, "blotter": blotter, "slippage": {"avg_bps": slip[0], "n": slip[1]},
         "risk": risk, "desk": desk,
-        "tracking": tracking_block(state_dir, "equity", prices, strat, bench, rf, 252),
+        "tracking": tracking,
         "forecast": equity_forecast(mp),
     }
 
