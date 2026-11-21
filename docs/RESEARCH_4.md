@@ -10,73 +10,73 @@ Weekly forecasts out of sample from January 2014; each model refitted every Janu
 
 | Model | Out-of-sample R² | DM p | Hit rate | RMSE |
 |---|---|---|---|---|
-| Historical mean | +0.00% |  | 57.7% | 0.0169 |
-| Ridge regression | -3.10% | 0.86 | 55.1% | 0.0172 |
-| Random forest | +1.22% | 0.22 | 55.7% | 0.0168 |
-| Gradient boosting | -1.90% | 0.66 | 55.7% | 0.0171 |
-| Neural network | -10.18% | 0.97 | 51.3% | 0.0178 |
-| ARIMA(p,1,0) | +0.66% | 0.18 | 56.7% | 0.0169 |
-| Momentum rule | -0.47% | 0.90 | 49.9% | 0.0170 |
-| Ensemble | +2.69% | 0.06 | 57.0% | 0.0167 |
+| Historical mean | +0.00% |  | 57.3% | 0.0172 |
+| Ridge regression | -96.36% | 1.00 | 55.3% | 0.0241 |
+| Random forest | +2.60% | 0.09 | 55.3% | 0.0170 |
+| Gradient boosting | -12.25% | 0.98 | 53.5% | 0.0183 |
+| Neural network | -1698.67% | 1.00 | 50.5% | 0.0731 |
+| ARIMA(p,1,0) | +0.97% | 0.09 | 57.1% | 0.0171 |
+| Momentum rule | -0.68% | 0.90 | 48.7% | 0.0173 |
+| Ensemble | -29.86% | 0.98 | 56.8% | 0.0196 |
 
 | Rule (ensemble) | Result | Evidence |
 |---|---|---|
-| Out-of-sample R² above 0 and Diebold-Mariano p < 0.05 | **fail** | R² +2.69%, DM p 0.06 |
-| Hit rate above 50%, binomial p < 0.05 | pass | 57.0% of 672 forecasts (672 independent), p 0.00 |
+| Out-of-sample R² above 0 and Diebold-Mariano p < 0.05 | **fail** | R² -29.86%, DM p 0.98 |
+| Hit rate above 50%, binomial p < 0.05 | pass | 56.8% of 620 forecasts (620 independent), p 0.00 |
 
 ### 21 trading days
 
 | Model | Out-of-sample R² | DM p | Hit rate | RMSE |
 |---|---|---|---|---|
-| Historical mean | +0.00% |  | 66.0% | 0.0375 |
-| Ridge regression | -13.35% | 0.99 | 62.4% | 0.0399 |
-| Random forest | -2.70% | 0.74 | 64.6% | 0.0380 |
-| Gradient boosting | -34.12% | 1.00 | 53.9% | 0.0434 |
-| Neural network | -17.15% | 1.00 | 61.8% | 0.0406 |
-| ARIMA(p,1,0) | -0.28% | 0.69 | 66.0% | 0.0375 |
-| Momentum rule | -1.71% | 0.93 | 56.7% | 0.0378 |
-| Ensemble | -1.63% | 0.75 | 63.9% | 0.0378 |
+| Historical mean | +0.00% |  | 65.9% | 0.0384 |
+| Ridge regression | -423.42% | 1.00 | 53.7% | 0.0879 |
+| Random forest | -4.81% | 0.97 | 59.1% | 0.0393 |
+| Gradient boosting | -55.25% | 1.00 | 58.3% | 0.0479 |
+| Neural network | -1934.69% | 0.97 | 58.3% | 0.1733 |
+| ARIMA(p,1,0) | +0.43% | 0.26 | 65.9% | 0.0383 |
+| Momentum rule | -2.14% | 0.92 | 55.8% | 0.0388 |
+| Ensemble | -37.85% | 1.00 | 60.4% | 0.0451 |
 
 | Rule (ensemble) | Result | Evidence |
 |---|---|---|
-| Out-of-sample R² above 0 and Diebold-Mariano p < 0.05 | **fail** | R² -1.63%, DM p 0.75 |
-| Hit rate above 50%, binomial p < 0.05 | pass | 63.9% of 670 forecasts (159 independent), p 0.00 |
+| Out-of-sample R² above 0 and Diebold-Mariano p < 0.05 | **fail** | R² -37.85%, DM p 1.00 |
+| Hit rate above 50%, binomial p < 0.05 | pass | 60.4% of 618 forecasts (147 independent), p 0.01 |
 
 ### 63 trading days
 
 | Model | Out-of-sample R² | DM p | Hit rate | RMSE |
 |---|---|---|---|---|
-| Historical mean | +0.00% |  | 74.1% | 0.0591 |
-| Ridge regression | -34.63% | 1.00 | 68.8% | 0.0685 |
-| Random forest | -8.83% | 0.95 | 66.7% | 0.0616 |
-| Gradient boosting | -51.38% | 1.00 | 57.8% | 0.0727 |
-| Neural network | -28.25% | 1.00 | 60.8% | 0.0669 |
-| ARIMA(p,1,0) | -0.73% | 0.66 | 74.1% | 0.0593 |
-| Momentum rule | -3.70% | 0.94 | 64.0% | 0.0601 |
-| Ensemble | -0.17% | 0.51 | 69.6% | 0.0591 |
+| Historical mean | +0.00% |  | 73.2% | 0.0617 |
+| Ridge regression | -834.87% | 0.98 | 62.1% | 0.1886 |
+| Random forest | -14.17% | 0.97 | 62.6% | 0.0659 |
+| Gradient boosting | -88.91% | 1.00 | 56.2% | 0.0848 |
+| Neural network | -330.97% | 0.96 | 57.8% | 0.1280 |
+| ARIMA(p,1,0) | +1.92% | 0.18 | 73.2% | 0.0611 |
+| Momentum rule | -4.43% | 0.91 | 62.3% | 0.0630 |
+| Ensemble | -55.44% | 1.00 | 61.1% | 0.0769 |
 
 | Rule (ensemble) | Result | Evidence |
 |---|---|---|
-| Out-of-sample R² above 0 and Diebold-Mariano p < 0.05 | **fail** | R² -0.17%, DM p 0.51 |
-| Hit rate above 50%, binomial p < 0.05 | pass | 69.6% of 664 forecasts (52 independent), p 0.00 |
+| Out-of-sample R² above 0 and Diebold-Mariano p < 0.05 | **fail** | R² -55.44%, DM p 1.00 |
+| Hit rate above 50%, binomial p < 0.05 | **fail** | 61.1% of 612 forecasts (48 independent), p 0.06 |
 
 ## Track B: point-in-time S&P 500 cross-section
 
 | Model | Rank IC | IC t | Top 20% vs equal weight, IR | t |
 |---|---|---|---|---|
 | Ridge regression | -0.009 | -0.5 | -0.02 | -0.1 |
-| Random forest | -0.007 | -0.4 | +0.01 | +0.0 |
-| Gradient boosting | -0.003 | -0.2 | +0.09 | +0.3 |
-| Neural network | -0.001 | -0.1 | +0.14 | +0.5 |
+| Random forest | -0.006 | -0.4 | +0.00 | +0.0 |
+| Gradient boosting | -0.004 | -0.3 | +0.03 | +0.1 |
+| Neural network | +0.001 | +0.1 | +0.11 | +0.4 |
 | Momentum rule | -0.010 | -0.5 | -0.09 | -0.3 |
-| Ensemble | -0.005 | -0.3 | +0.00 | +0.0 |
+| Ensemble | -0.005 | -0.3 | +0.04 | +0.1 |
 
 | Rule (ensemble) | Result | Evidence |
 |---|---|---|
 | 1. Signal | **fail** | IC -0.005, t -0.3 |
-| 2. Edge vs equal weight | **fail** | IR +0.00, t +0.0 over 10.8 years |
-| 3. Deflated | **fail** | 4% after 33 trials |
-| 4. Stability | pass | 2016–19 -0.19, 2020–22 +0.12, 2023–now +0.03 |
+| 2. Edge vs equal weight | **fail** | IR +0.04, t +0.1 over 10.8 years |
+| 3. Deflated | **fail** | 6% after 33 trials |
+| 4. Stability | pass | 2016–19 -0.07, 2020–22 +0.16, 2023–now +0.04 |
 | 5. Breadth | **fail** | liquid +0.13, less liquid -0.12 |
 | 6. Coverage | **fail** | 83.9% of member-months priced |
 
