@@ -112,7 +112,7 @@ function renderMarket() {
       ["GARCH σ over horizon", pct(H.sigma, 1, false)], ["Interval coverage", `${pct(S.coverage80, 0, false)} <small class="mut">of 80%</small>`],
       ["Rule: R² > 0, DM p < 0.05", pass(H.rules[0][1])], ["Verdict", H.passed ? '<b class="up">skill shown</b>' : '<b class="dn">no skill shown</b>']], 4)}
     ${table(["Model", "Forecast today", "Out-of-sample R²", "DM p", "Hit rate"], rows)}`;
-  $("fcmnote").innerHTML = `Out of sample since 2014: every model refitted each January on past data only. R² is measured against the historical mean; below 0 means worse than simply assuming the average return. The historical mean's own hit rate is ${pct(hm.hit, 0, false)} because markets mostly rise, so beating 50% proves nothing; the model has to beat ${pct(hm.hit, 0, false)}. Bull, base and bear come from this period's GARCH volatility and the spread of past forecast errors. Chart: ensemble forecast (amber) against what happened (blue), last 5 years.`;
+  $("fcmnote").innerHTML = `Features: ${esc(A.feature_source || "Yahoo market prices")}. Out of sample since 2014: every model refitted each January on past data only. R² is measured against the historical mean; below 0 means worse than simply assuming the average return. The historical mean's own hit rate is ${pct(hm.hit, 0, false)} because markets mostly rise, so beating 50% proves nothing; the model has to beat ${pct(hm.hit, 0, false)}. Bull, base and bear come from this period's GARCH volatility and the spread of past forecast errors. Chart: ensemble forecast (amber) against what happened (blue), last 5 years.`;
   const c = chart("fcmc"), hs = H.history;
   line(c, css("--blue"), "Realized").setData(hs.dates.map((d, i) => ({ time: d, value: hs.realized[i] * 100 })));
   line(c, css("--amber"), "Forecast").setData(hs.dates.map((d, i) => ({ time: d, value: hs.forecast[i] * 100 })));
@@ -251,8 +251,9 @@ function renderIntegrity() {
     ${sub("Bias controls")}<ul class="ul">${L.controls.map((c) => `<li>${esc(c)}</li>`).join("")}</ul></div>
     <div>${sub("Unavailable, and not replaced by estimates")}${table(["Item", "Why"], L.unavailable.map((u) => `<tr><td class="l wrap"><b class="dn">✕</b> ${esc(u.item)}</td><td class="mut wrap">${esc(u.why)}</td></tr>`))}
     ${sub("What the tests found")}<ul class="ul">
-      <li>Four pre-registered tests: no stock signal or model shows an edge over equal weight on the fair, point-in-time S&amp;P 500.</li>
-      <li>No market-forecasting model beats the historical mean out of sample at 1 week, 1 month or 3 months.</li>
+      <li>Seven pre-registered tests: no stock signal or model shows an edge over equal weight on the fair, point-in-time S&amp;P 500.</li>
+      <li>No market-forecasting model beats the historical mean out of sample at 1 week, 1 month or 3 months, with Yahoo stand-ins (test 4) or point-in-time FRED / ALFRED macro data (test 6).</li>
+      <li>No fundamental signal from SEC filings (book-to-market, earnings yield, profitability, earnings surprises) shows an edge (test 7).</li>
       <li>Volatility <i>is</i> forecastable: GARCH beat the 63-day sample for 96% of stocks, and the live strategy uses it.</li>
       <li>Every report is in the repository: docs/RESEARCH*.md, with the rules in docs/PREREGISTRATION*.md.</li></ul></div></div>`;
 }

@@ -31,7 +31,7 @@ SECTOR_ETFS = {"XLK": "Technology", "XLF": "Financials", "XLV": "Health Care", "
                "XLRE": "Real Estate", "XLC": "Communication Services"}
 UNAVAILABLE = [
     ("Institutional flows (13F, fund flows, order flow)", "no free real-time source; nothing is estimated or shown in their place"),
-    ("Point-in-time company fundamentals", "SEC EDGAR has them free, but they are not built in yet; no fundamental model runs"),
+    ("Analyst estimates and revisions", "not free (I/B/E/S); earnings surprises are measured against the company's own history instead"),
     ("Economic-events calendar", "no free, reliable machine-readable source; FOMC, CPI and payroll dates are not shown"),
     ("Options data (implied volatility surface, skew, open interest)", "not available free; VIX and VIX3M are the only implied-volatility inputs"),
     ("Prices of about 24% of former S&P 500 members", "Yahoo has no history for many delisted stocks (84% of member-months are priced)"),
@@ -309,10 +309,20 @@ def leverage_sim(r, rf, levels=(1.0, 1.5, 2.0, 3.0), years=1, paths=2000, block=
 # ---------------------------------------------------------------- forecasts
 
 def track_a(close, rf_d):
-    """SPY: every model's out-of-sample record and today's forecasts, per horizon."""
-    P, F, lp = models.walk_forward_market(close)
+    """SPY: every model's out-of-sample record and today's forecasts, per horizon. With a FRED key the macro
+    features are point-in-time FRED / ALFRED data (test 6); without one, test 4's Yahoo stand-ins."""
+    source = "Yahoo market prices (test 4)"
+    features = None
+    if os.environ.get("FRED_API_KEY"):
+        from . import macro
+        tech, lp0, _ = models.technical_features(close["SPY"].dropna())
+        rows = models.weekly_rows(lp0.index[lp0.index >= "2006-01-01"])
+        market, vint = macro.load_fred()
+        features = tech[macro.TECHNICAL].reindex(rows).join(macro.macro_features(market, vint, rows))
+        source = "FRED / ALFRED, as known on each date (test 6)"
+    P, F, lp = models.walk_forward_market(close, features=features)
     r = lp.diff()
-    out = {"features": list(F.columns), "asof": str(lp.index[-1].date()), "horizons": {}}
+    out = {"features": list(F.columns), "feature_source": source, "asof": str(lp.index[-1].date()), "horizons": {}}
     for h, df in P.items():
         ev = models.evaluate(df, h)
         today = df.iloc[-1]
@@ -523,6 +533,11 @@ def main(state_dir=os.path.join(ROOT, "state"), site_dir=os.path.join(ROOT, "sit
                            f"out-of-sample R² {h21['eval'][models.ENSEMBLE]['r2_oos']:+.1%}. Research only, not traded."))
 
     sources = [
+        {"data": "Macro series as first published (payrolls, unemployment, CPI, production, claims, conditions, permits) and market rates",
+         "source": "FRED / ALFRED (St. Louis Fed), vintages" if os.environ.get("FRED_API_KEY") else "not loaded (no FRED key in this build)",
+         "asof": built[:10], "kind": "DATA"},
+        {"data": "Company fundamentals: equity, shares, EPS, net income, assets, with filing dates",
+         "source": "SEC EDGAR XBRL (data/fundamental_events.csv.gz; tested in RESEARCH_7, no edge found)", "asof": "research run", "kind": "DATA"},
         {"data": "Daily prices, volumes, VIX, Treasury yields, ETFs, futures", "source": "Yahoo Finance (yfinance), adjusted",
          "asof": str(c.index[-1].date()), "kind": "DATA"},
         {"data": "Point-in-time S&P 500 membership", "source": "github.com/fja05680/sp500 (MIT licence)", "asof": "data/sp500_ticker_start_end.csv", "kind": "DATA"},
@@ -536,7 +551,7 @@ def main(state_dir=os.path.join(ROOT, "state"), site_dir=os.path.join(ROOT, "sit
         "Point-in-time S&P 500 membership for every cross-sectional test (no hindsight universe).",
         "Purged walk-forward: every model is refitted each January on data whose target ended before that date.",
         "The rules of every test were committed to git before it ran (docs/PREREGISTRATION*.md).",
-        "Deflated Sharpe ratios count every configuration tried in the project (33).",
+        "Deflated Sharpe ratios count every configuration tried in the project (43 by test 7).",
         "Costs: 2 bp per unit of turnover for SPY, 7 bp for stocks, 0.5% a year to borrow shares, T-bills + 1% to borrow cash.",
         "A signal at a close trades at the next close (daily) or holds for the next month (monthly); no same-bar fills.",
         "Survivorship-biased results are labelled: pairs trading (today's S&P 100), crypto (today's coins), allocations (today's 30 names).",

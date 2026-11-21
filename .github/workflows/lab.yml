@@ -18,6 +18,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      FRED_API_KEY: ${{ secrets.FRED_API_KEY }}   # point-in-time macro features for the market forecast
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
