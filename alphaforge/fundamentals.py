@@ -180,10 +180,10 @@ def run():
     test = monthly.index[(monthly.index >= TEST_FROM) & (monthly.index < monthly.index[-1])]
     ev = download_events(tick)
     rp = raw_prices(tick).reindex(columns=tick)
-    raw_m = rp.groupby(rp.index.to_period("M")).last()
-    raw_m.index = monthly.index[:len(raw_m)] if len(raw_m) == len(monthly) else pd.DatetimeIndex(
-        [monthly.index[monthly.index.to_period("M") == p][0] for p in raw_m.index if (monthly.index.to_period("M") == p).any()])
-    raw_m = raw_m.reindex(monthly.index)
+    raw_m = rp.groupby(rp.index.to_period("M")).last()                 # last actual close of each month
+    month_end = pd.Series(monthly.index, index=monthly.index.to_period("M"))
+    raw_m.index = month_end.reindex(raw_m.index).values
+    raw_m = raw_m[raw_m.index.notna()].reindex(monthly.index)
     sig = {
         "F1": asof_panel(ev, "equity", test, tick) / (raw_m.loc[test] * asof_panel(ev, "shares", test, tick)),
         "F2": asof_panel(ev, "eps_annual", test, tick) / raw_m.loc[test],
