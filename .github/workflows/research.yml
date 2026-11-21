@@ -1,0 +1,63 @@
+name: research
+# Manual research runs that need the FRED key or the SEC contact (repository secrets). Never scheduled; places
+# no trades. Reports are committed to docs/; downloaded raw data stays in the Actions cache.
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: "What to run"
+        type: choice
+        options: [check, fred, edgar]
+        default: check
+
+permissions:
+  contents: write
+
+concurrency:
+  group: research
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+      SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - name: Restore downloaded data
+        uses: actions/cache@v4
+        with:
+          path: data/cache
+          key: research-${{ inputs.task }}-${{ github.run_id }}
+          restore-keys: research-${{ inputs.task }}-
+
+      - name: Check access
+        if: inputs.task == 'check'
+        run: python -m alphaforge.sources --check
+
+      - name: Macro re-test (FRED / ALFRED)
+        if: inputs.task == 'fred'
+        run: python -m alphaforge.macro
+
+      - name: Fundamentals (SEC EDGAR)
+        if: inputs.task == 'edgar'
+        run: python -m alphaforge.fundamentals
+
+      - name: Commit reports
+        if: inputs.task != 'check'
+        run: |
+          git config user.name "alphaforge-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/ data/*.csv.gz 2>/dev/null || true
+          if ! git diff --cached --quiet; then
+            git commit -m "research: ${{ inputs.task }} $(date -u +%F)"
+            git pull --rebase -q && git push
+          fi
