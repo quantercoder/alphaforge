@@ -71,17 +71,23 @@ def garch_filtered_vol(r, start_year=2008, min_obs=500):
     return out
 
 
-def market_features(close):
-    """Daily feature frame and log price for SPY, from a Close frame with Yahoo columns."""
-    c = close.ffill()
-    spy = c["SPY"]
+def technical_features(spy):
+    """SPY's own features: past returns, distance from its 200-day average, realized and GARCH volatility."""
     lp = np.log(spy)
     r = lp.diff()
     f = pd.DataFrame({
         "ret_5d": lp - lp.shift(5), "ret_21d": lp - lp.shift(21), "ret_63d": lp - lp.shift(63), "ret_252d": lp - lp.shift(252),
         "vs_200d_avg": lp - np.log(spy.rolling(200).mean()),
         "realized_vol_21d": r.rolling(21).std() * math.sqrt(252),
-        "garch_vol": garch_filtered_vol(r),
+        "garch_vol": garch_filtered_vol(r)})
+    return f, lp, r
+
+
+def market_features(close):
+    """Daily feature frame and log price for SPY, from a Close frame with Yahoo columns (test 4's features)."""
+    c = close.ffill()
+    tech, lp, r = technical_features(c["SPY"])
+    f = tech.assign(**{
         "vix": c["^VIX"], "vix_21d_change": c["^VIX"] - c["^VIX"].shift(21),
         "term_spread": c["^TNX"] - c["^IRX"],
         "credit_63d": np.log(c["HYG"] / c["IEF"]) - np.log(c["HYG"] / c["IEF"]).shift(63),
@@ -130,12 +136,17 @@ def ar_forecast(hist, p, beta, h):
 
 # ---------------------------------------------------------------- track A walk-forward
 
-def walk_forward_market(close, first_oos=2014, horizons=HORIZONS, models=LEARNERS):
-    """Returns ({h: frame of forecasts by model with the realized target 'y'}, features, log price)."""
-    F, lp, r = market_features(close)
+def walk_forward_market(close, first_oos=2014, horizons=HORIZONS, models=LEARNERS, features=None):
+    """Returns ({h: frame of forecasts by model with the realized target 'y'}, features, log price).
+    `features`: a ready-made feature frame indexed by forecast dates (test 6); otherwise test 4's features."""
+    if features is None:
+        F, lp, r = market_features(close)
+    else:
+        _, lp, r = technical_features(close["SPY"].ffill())
+        F = features
     idx = lp.index
     pos = pd.Series(np.arange(len(idx)), index=idx)
-    rows = weekly_rows(idx[idx >= F.dropna().index[0]])
+    rows = weekly_rows(idx[idx >= F.dropna().index[0]]) if features is None else F.dropna().index
     out = {}
     for h in horizons:
         y = (lp.shift(-h) - lp)

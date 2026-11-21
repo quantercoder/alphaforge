@@ -60,3 +60,16 @@ def test_panel_walk_forward_purges_and_stays_causal():
     for y in ("2016", "2017"):  # 2017's model is fitted on January 1st, so it must not see that target
         pd.testing.assert_frame_equal(base["Ridge regression"].loc[y], alt["Ridge regression"].loc[y])
     assert not base["Ridge regression"].loc["2018"].equals(alt["Ridge regression"].loc["2018"])
+
+
+def test_alfred_values_are_as_first_known():
+    from alphaforge.macro import known_on
+    T = pd.Timestamp
+    v = pd.DataFrame({  # January's payrolls: published as 100 on Feb 7, revised to 90 on Mar 6
+        "date": [T("2020-01-01"), T("2020-01-01"), T("2020-02-01")],
+        "value": [100.0, 90.0, 110.0],
+        "realtime_start": [T("2020-02-07"), T("2020-03-06"), T("2020-03-06")],
+        "realtime_end": [T("2020-03-05"), T("2262-04-11"), T("2262-04-11")]})
+    assert known_on(v, T("2020-02-06")).empty                            # not yet published
+    assert known_on(v, T("2020-02-20")).tolist() == [100.0]              # first release, revision not visible
+    assert known_on(v, T("2020-03-10")).tolist() == [90.0, 110.0]        # after the revision
