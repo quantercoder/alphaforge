@@ -7,7 +7,7 @@ Generated 2026-11-24 by `python -m alphaforge.multiasset`. Rules committed befor
 | Strategy | CAGR | Vol | Sharpe | Max DD | Worst year | Global financial crisis | 2011 euro crisis | Q4 2018 selloff | COVID crash | 2022 rates shock |
 |---|---|---|---|---|---|---|---|---|---|---|
 | Trend following (TSMOM, candidate) | 5.1% | 7.2% | 0.48 | -14.8% | -8.1% | +10.4% | +2.8% | -10.7% | -1.3% | -0.5% |
-| Risk parity | 5.5% | 9.3% | 0.44 | -32.1% | -14.2% | -24.0% | -4.0% | -8.3% | -17.3% | -12.3% |
+| Risk parity | 5.5% | 9.3% | 0.43 | -32.1% | -14.2% | -24.0% | -4.0% | -8.3% | -17.3% | -12.3% |
 | Dual momentum | 8.3% | 15.8% | 0.47 | -33.7% | -16.6% | -0.9% | -14.9% | -18.9% | -33.4% | -16.6% |
 | 60/40 (SPY / IEF) | 7.9% | 10.7% | 0.60 | -32.2% | -17.7% | -31.9% | -4.6% | -10.3% | -18.4% | -16.6% |
 | Permanent portfolio | 6.9% | 7.5% | 0.70 | -18.7% | -13.8% | -3.9% | +5.8% | -1.9% | -5.8% | -13.8% |
